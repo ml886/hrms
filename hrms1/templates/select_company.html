@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}选择公司 - {{ sys_title }}{% endblock %}
+{% block page_title %}选择公司{% endblock %}
+{% block content %}
+<style>
+/* 公司卡片：Logo 放大居中展示 */
+.sc-card{border:1px solid #e5e7eb;transition:transform .12s,box-shadow .12s,border-color .12s}
+.sc-card:hover{transform:translateY(-2px);border-color:#60a5fa!important;box-shadow:0 8px 22px rgba(96,165,250,.18)}
+.sc-logo-box{width:120px;height:120px;border-radius:14px;border:1px solid #eef2f7;background:#fff;
+  display:flex;align-items:center;justify-content:center;padding:10px;margin:0 auto 14px;overflow:hidden}
+.sc-logo-box img{width:100%;height:100%;object-fit:contain}
+.sc-logo-fallback{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:46px;color:#cbd5e1}
+</style>
+
+<div style="max-width:980px;margin:0 auto">
+  <div class="card">
+    <div class="card-body">
+      <h5 class="mb-1"><i class="bi bi-building"></i> 请选择要管理的公司</h5>
+      <p class="text-muted" style="font-size:13px;margin-bottom:18px">
+        您当前账号可管理以下公司，选择后将进入该公司独立的数据空间（各公司数据互不影响）。
+      </p>
+
+      {% if companies %}
+      <div class="row g-3">
+        {% for c in companies %}
+        <div class="col-md-4">
+          <div class="card h-100 sc-card">
+            <div class="card-body d-flex flex-column text-center">
+              <div class="sc-logo-box">
+                <img src="/company-logo/{{ c.id }}" alt="{{ c.name }}"
+                     onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex'">
+                <div class="sc-logo-fallback" style="display:none"><i class="bi bi-building"></i></div>
+              </div>
+              <div style="font-weight:700;font-size:15px">{{ c.name }}</div>
+              <div style="font-size:12px;color:#9ca3af;margin-bottom:8px">编码：{{ c.code }}</div>
+              {% if c.remark %}<div class="text-muted" style="font-size:12.5px;margin-bottom:10px">{{ c.remark }}</div>{% endif %}
+              <div class="mt-auto w-100">
+                <a href="{{ url_for('set_company', cid=c.id) }}" class="btn btn-primary btn-sm w-100">
+                  <i class="bi bi-box-arrow-in-right"></i> 进入管理</a>
+              </div>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif need_create %}
+      <div class="empty">
+        <i class="bi bi-building" style="font-size:40px;color:#cbd5e1"></i>
+        <p class="mt-2 mb-3">系统中还没有任何公司，请先创建第一个公司。</p>
+        <button class="btn btn-primary" onclick="showCreate()"><i class="bi bi-plus-lg"></i> 新建公司</button>
+      </div>
+      {% else %}
+      <div class="empty">
+        <i class="bi bi-exclamation-circle" style="font-size:40px;color:#f59e0b"></i>
+        <p class="mt-2">您暂未被分配任何公司权限，请联系管理员在「账号管理」中为您授权。</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if is_admin %}
+  <div class="text-center mt-3">
+    <a href="{{ url_for('companies_page') }}" class="btn btn-outline-secondary btn-sm">
+      <i class="bi bi-gear"></i> 公司管理（新增/停用）</a>
+  </div>
+  {% endif %}
+</div>
+
+<!-- 新建公司弹窗 -->
+<div class="modal fade" id="createModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" style="font-size:14px;font-weight:700"><i class="bi bi-plus-lg"></i> 新建公司</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-2">
+          <label class="modal-label">公司名称 <span class="text-danger">*</span></label>
+          <input class="form-control" id="cName" placeholder="如：昆明韬达人力资源有限公司">
+        </div>
+        <div class="mb-2">
+          <label class="modal-label">公司编码</label>
+          <input class="form-control" id="cCode" placeholder="留空则按名称自动生成（用于库文件名，唯一）">
+        </div>
+        <div class="mb-1">
+          <label class="modal-label">备注</label>
+          <input class="form-control" id="cRemark" placeholder="选填">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="doCreate()">创建</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function showCreate(){ new bootstrap.Modal(document.getElementById('createModal')).show(); }
+async function doCreate(){
+  const name = document.getElementById('cName').value.trim();
+  if(!name){ showToast('请填写公司名称', 'error'); return; }
+  const data = await api('/api/company-create', {method:'POST', body: JSON.stringify({
+    name, code: document.getElementById('cCode').value.trim(), remark: document.getElementById('cRemark').value.trim()
+  })});
+  if(data){
+    showToast('公司创建成功', 'success');
+    setTimeout(()=>location.reload(), 800);
+  }
+}
+</script>
+{% endblock %}

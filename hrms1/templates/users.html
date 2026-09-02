@@ -1,0 +1,315 @@
+{% extends 'base.html' %}
+{% block page_title %}账号管理{% endblock %}
+{% block content %}
+<style>
+.dept-check-list{max-height:200px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px;padding:8px 10px;background:#fff}
+.dept-check-list .form-check{margin-bottom:2px}
+.dept-check-list .form-check-label{font-size:14px;cursor:pointer}
+</style>
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-person-gear"></i> 账号管理</h5>
+      {% if current_user.role == 'admin' %}
+      <button class="btn btn-primary btn-sm" onclick="openModal()"><i class="bi bi-plus-lg"></i> 新增账号</button>
+      {% endif %}
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover">
+        <thead><tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>关联员工</th><th>查看范围</th><th>创建日期</th><th>操作</th></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">账号信息</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="mId">
+        <div class="mb-3"><label class="modal-label">用户名</label><input id="mUsername" class="form-control"></div>
+        <div class="mb-3"><label class="modal-label">姓名</label><input id="mName" class="form-control"></div>
+        <div class="mb-3"><label class="modal-label">角色</label>
+          <select id="mRole" class="form-select"><option value="admin">管理员</option><option value="hr">HR</option><option value="employee">员工</option></select>
+        </div>
+
+        <!-- HR 模块操作权限 -->
+        <div class="mb-3" id="permBox" style="display:none">
+          <label class="modal-label">模块操作权限（HR）</label>
+          <div class="table-responsive">
+            <table class="table table-sm" style="font-size:13px;margin-bottom:6px">
+              <thead><tr><th style="width:42%">模块</th><th class="text-center">查看</th><th class="text-center">管理</th></tr></thead>
+              <tbody id="permRows"></tbody>
+            </table>
+          </div>
+          <div class="text-muted" style="font-size:12px">勾选「管理」需同时勾选「查看」；仅勾选「查看」时该 HR 只能浏览、不能新增/修改/删除/导入。</div>
+        </div>
+
+        <!-- 员工查看范围 -->
+        <div class="mb-3" id="scopeBox" style="display:none">
+          <label class="modal-label">查看范围（员工）</label>
+          <div class="mb-2">
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="scope" id="mScopeSelf" value="self" checked>
+              <label class="form-check-label" for="mScopeSelf">仅看自己</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="scope" id="mScopeDept" value="dept">
+              <label class="form-check-label" for="mScopeDept">按客户单位查看</label>
+            </div>
+          </div>
+          <div id="deptBox" style="display:none">
+            <div id="deptList" class="dept-check-list"></div>
+            <div class="mt-2">
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllDepts(true)"><i class="bi bi-check-all"></i> 全选</button>
+              <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllDepts(false)"><i class="bi bi-x-lg"></i> 清空</button>
+            </div>
+            <div class="text-muted mt-1" style="font-size:12px">可多选客户单位；勾选后可查看对应客户单位人员信息。</div>
+          </div>
+        </div>
+
+        <!-- HR / 员工可管理的公司（多公司时由管理员分配） -->
+        <div class="mb-3" id="companyBox" style="display:none">
+          <label class="modal-label">可管理的公司（HR / 员工）</label>
+          <div id="companyList" class="dept-check-list"></div>
+          <div class="mt-2">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllCompanies(true)"><i class="bi bi-check-all"></i> 全选</button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="selectAllCompanies(false)"><i class="bi bi-x-lg"></i> 清空</button>
+          </div>
+          <div class="text-muted mt-1" style="font-size:12px">可多选公司；该账号仅能访问被选公司。若未选任何公司，登录后将提示无可用公司。</div>
+        </div>
+
+        <div class="mb-3" id="empLinkWrap"><label class="modal-label">关联员工（员工角色需选）</label><select id="mEmp" class="form-select"><option value="">-</option></select></div>
+        <div class="mb-3"><label class="modal-label">密码（留空=不修改）</label><input type="password" id="mPwd" class="form-control" placeholder="新密码"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-primary" onclick="save()">保存</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MODULE_LIST = [
+  ['employee', '员工信息管理'], ['insurance', '五险一金管理'], ['todos', '待办事项管理'],
+  ['logs', '操作记录查询'], ['users', '账号管理'], ['dicts', '代码字段维护'], ['backup', '数据备份']
+];
+const canManageUsers = {{ 'true' if can_manage_module('users') else 'false' }};
+const viewerRole = '{{ current_user.role }}';
+const currentUserId = {{ current_user.id }};
+let employees = [];
+let companies = [];
+
+function buildPermRows(){
+  document.getElementById('permRows').innerHTML = MODULE_LIST.map(([k, name])=>`
+    <tr>
+      <td>${name}</td>
+      <td class="text-center"><input class="form-check-input" type="checkbox" id="v_${k}" checked onchange="onViewChange('${k}')"></td>
+      <td class="text-center"><input class="form-check-input" type="checkbox" id="m_${k}" checked onchange="onManageChange('${k}')"></td>
+    </tr>`).join('');
+}
+function onViewChange(k){
+  if(!document.getElementById('v_'+k).checked) document.getElementById('m_'+k).checked = false;
+}
+function onManageChange(k){
+  if(document.getElementById('m_'+k).checked) document.getElementById('v_'+k).checked = true;
+}
+
+async function loadEmployees(){
+  const data = await api('/api/employees');
+  if(data) employees = data.items;
+}
+async function loadDepts(){
+  const d = await api('/api/employees/departments');
+  if(!d) return;
+  document.getElementById('deptList').innerHTML = d.items.map(dep=>
+    `<div class="form-check"><input class="form-check-input dept-chk" type="checkbox" id="dep_${encodeURIComponent(dep)}" value="${esc(dep)}"><label class="form-check-label" for="dep_${encodeURIComponent(dep)}">${esc(dep)}</label></div>`
+  ).join('');
+}
+function selectAllDepts(on){
+  document.querySelectorAll('.dept-chk').forEach(c=>c.checked=on);
+}
+
+async function loadCompanies(){
+  const d = await api('/api/companies');
+  if(!d) return;
+  companies = (d.items || []);
+  document.getElementById('companyList').innerHTML = companies.map(c=>
+    `<div class="form-check"><input class="form-check-input comp-chk" type="checkbox" id="comp_${c.id}" value="${c.id}"><label class="form-check-label" for="comp_${c.id}">${esc(c.name)}</label></div>`
+  ).join('');
+}
+function selectAllCompanies(on){
+  document.querySelectorAll('.comp-chk').forEach(c=>c.checked=on);
+}
+
+async function loadList(){
+  const data = await api('/api/users');
+  if(!data) return;
+  const tb = document.getElementById('listBody');
+  if(data.items.length===0){ tb.innerHTML='<tr><td colspan="8" class="empty">暂无账号</td></tr>'; return; }
+  const roleMap = {admin:'管理员', hr:'HR', employee:'员工'};
+  tb.innerHTML = data.items.map(u=>{
+    const emp = employees.find(e=>e.id===u.employee_id);
+    let scope = '-';
+    if(u.role==='employee'){
+      scope = u.emp_view_mode==='dept' ? ('按客户单位：'+esc((Array.isArray(u.emp_depts)?u.emp_depts.join('、'):''))) : '仅看自己';
+    }
+    const isSelf = u.id === currentUserId;
+    let ops = '-';
+    if (canManageUsers) {
+      if (viewerRole === 'admin' && !isSelf) {
+        ops = `<button class="btn btn-outline-primary btn-sm me-1" onclick="edit(${u.id})">编辑</button>
+               <button class="btn btn-outline-danger btn-sm" onclick="del(${u.id})">删除</button>`;
+      } else {
+        // 管理员本人 / HR / 员工：仅「编辑」（删除仅管理员对他人开放；范围已按角色收敛）
+        ops = `<button class="btn btn-outline-primary btn-sm" onclick="edit(${u.id})">编辑</button>`;
+      }
+    }
+    return `<tr>
+      <td>${u.id}</td><td>${esc(u.username)}</td><td>${esc(u.name)}</td>
+      <td><span class="role-tag">${roleMap[u.role]}</span></td>
+      <td>${emp?esc(emp.name):'-'}</td><td>${scope}</td><td>${u.created_at}</td>
+      <td>${ops}</td>
+    </tr>`;
+  }).join('');
+}
+
+async function openModal(){
+  await loadEmployees();
+  await loadDepts();
+  await loadCompanies();
+  buildPermRows();
+  document.getElementById('mId').value='';
+  document.getElementById('mUsername').value='';
+  document.getElementById('mUsername').disabled=false;
+  document.getElementById('mName').value='';
+  document.getElementById('mRole').value='employee';
+  document.getElementById('mRole').style.display='';  // 管理员可设角色
+  document.getElementById('permBox').style.display='none';
+  document.getElementById('scopeBox').style.display='none';
+  document.getElementById('empLinkWrap').style.display='none';
+  document.getElementById('deptBox').style.display='none';
+  document.getElementById('companyBox').style.display='block';  // 新建默认员工角色，展示公司选择
+  document.querySelectorAll('.comp-chk').forEach(c=>c.checked=false);
+  MODULE_LIST.forEach(([k])=>{ document.getElementById('v_'+k).checked=true; document.getElementById('m_'+k).checked=true; });
+  document.getElementById('mScopeSelf').checked=true;
+  document.getElementById('mPwd').value='';
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+async function edit(id){
+  const data = await api('/api/users');
+  if(!data) return;
+  const u = data.items.find(x=>x.id===id);
+  if(!u) return;
+  await loadEmployees();
+  await loadDepts();
+  await loadCompanies();
+  buildPermRows();
+  const sel = document.getElementById('mEmp');
+  sel.innerHTML = '<option value="">-</option>' + employees.map(e=>`<option value="${e.id}" ${e.id===u.employee_id?'selected':''}>${e.name} - ${e.department||''}</option>`).join('');
+  document.getElementById('mId').value=u.id;
+  document.getElementById('mUsername').value=u.username;
+  document.getElementById('mName').value=u.name;
+  document.getElementById('mRole').value=u.role;
+  const editingSelf = u.id === currentUserId;
+  const isHr = u.role==='hr';
+  const isEmp = u.role==='employee';
+  // 可见性：角色选择仅管理员对他人显示；权限框仅管理员编辑 HR 显示；查看范围/关联员工仅编辑（非本人）员工时显示
+  const roleVisible = (viewerRole === 'admin' && !editingSelf);
+  const permVisible = (viewerRole === 'admin' && isHr);
+  const scopeVisible = (isEmp && !editingSelf);
+  const companyVisible = (viewerRole === 'admin' && (isHr || isEmp));
+  document.getElementById('mRole').style.display = roleVisible ? '' : 'none';
+  document.getElementById('mUsername').disabled = editingSelf || u.username==='hr';  // 改自己时或系统账号 hr 不可改用户名
+  document.getElementById('permBox').style.display = permVisible ? 'block' : 'none';
+  document.getElementById('scopeBox').style.display = scopeVisible ? 'block' : 'none';
+  document.getElementById('empLinkWrap').style.display = scopeVisible ? '' : 'none';
+  document.getElementById('companyBox').style.display = companyVisible ? 'block' : 'none';
+  if(companyVisible){
+    const ucs = Array.isArray(u.companies) ? u.companies : [];
+    document.querySelectorAll('.comp-chk').forEach(c=>{ c.checked = ucs.includes(parseInt(c.value)); });
+  }
+  if(permVisible){
+    MODULE_LIST.forEach(([k])=>{
+      document.getElementById('v_'+k).checked = !!u['can_'+k+'_view'];
+      document.getElementById('m_'+k).checked = !!u['can_'+k+'_manage'];
+    });
+  }
+  if(scopeVisible){
+    const mode = u.emp_view_mode || 'self';
+    document.getElementById('mScopeSelf').checked = mode==='self';
+    document.getElementById('mScopeDept').checked = mode==='dept';
+    document.getElementById('deptBox').style.display = mode==='dept' ? 'block' : 'none';
+    const depts = Array.isArray(u.emp_depts) ? u.emp_depts : [];
+    document.querySelectorAll('.dept-chk').forEach(c=>{ c.checked = depts.includes(c.value); });
+  }
+  document.getElementById('mPwd').value='';
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+document.getElementById('mRole').addEventListener('change', function(){
+  const r = this.value;
+  document.getElementById('permBox').style.display = r==='hr' ? 'block' : 'none';
+  const isEmp = r==='employee';
+  document.getElementById('scopeBox').style.display = isEmp ? 'block' : 'none';
+  document.getElementById('empLinkWrap').style.display = isEmp ? '' : 'none';
+  if(!isEmp) document.getElementById('deptBox').style.display='none';
+  const showComp = (r==='hr' || r==='employee');
+  document.getElementById('companyBox').style.display = showComp ? 'block' : 'none';
+  if(!showComp) document.querySelectorAll('.comp-chk').forEach(c=>c.checked=false);
+});
+document.querySelectorAll('input[name=scope]').forEach(el=>el.addEventListener('change', function(){
+  document.getElementById('deptBox').style.display = document.getElementById('mScopeDept').checked ? 'block' : 'none';
+}));
+
+function save(){
+  confirmAction('确定保存该账号信息吗？', ()=>{ doSave(); });
+}
+async function doSave(){
+  const id = document.getElementById('mId').value;
+  const body = {
+    username: document.getElementById('mUsername').value,
+    name: document.getElementById('mName').value,
+  };
+  // 只提交可见字段，避免本人编辑时误改角色/查看范围/关联员工
+  const roleVisible = document.getElementById('mRole').style.display !== 'none';
+  const permVisible = document.getElementById('permBox').style.display === 'block';
+  const scopeVisible = document.getElementById('scopeBox').style.display === 'block';
+  if(roleVisible) body.role = document.getElementById('mRole').value;
+  if(scopeVisible) body.employee_id = parseInt(document.getElementById('mEmp').value) || null;
+  if(permVisible){
+    MODULE_LIST.forEach(([k])=>{
+      body['can_'+k+'_view'] = document.getElementById('v_'+k).checked;
+      body['can_'+k+'_manage'] = document.getElementById('m_'+k).checked;
+    });
+  }
+  if(scopeVisible){
+    body.emp_view_mode = document.getElementById('mScopeDept').checked ? 'dept' : 'self';
+    body.emp_depts = Array.from(document.querySelectorAll('.dept-chk:checked')).map(c=>c.value);
+  }
+  const companyVisible = document.getElementById('companyBox').style.display === 'block';
+  if(companyVisible){
+    body.companies = Array.from(document.querySelectorAll('.comp-chk:checked')).map(c=>parseInt(c.value));
+  }
+  const pwd = document.getElementById('mPwd').value;
+  if(pwd) body.password = pwd;
+  if(id) await api('/api/users/'+id, {method:'PUT', body});
+  else { if(!pwd) body.password='123456'; await api('/api/users', {method:'POST', body}); }
+  bootstrap.Modal.getInstance(document.getElementById('modal')).hide();
+  loadList();
+}
+
+function del(id){
+  confirmAction('确认删除该账号吗？', async ()=>{ await doDel(id); }, true);
+}
+async function doDel(id){
+  await api('/api/users/'+id, {method:'DELETE'});
+  loadList();
+}
+
+loadEmployees().then(loadList);
+</script>
+{% endblock %}

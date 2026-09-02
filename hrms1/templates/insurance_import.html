@@ -1,0 +1,220 @@
+{% extends 'base.html' %}
+{% block page_title %}五险一金 - 社保明细导入{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <h5 style="margin:0 0 16px;font-weight:700"><i class="bi bi-cloud-upload"></i> 社保明细导入</h5>
+
+    <div class="mb-3">
+      {% if can_manage_module('insurance') %}
+      <button class="btn btn-primary" onclick="openImportModal()"><i class="bi bi-upload"></i> 社保明细导入</button>
+      {% else %}
+      <span class="text-muted" style="font-size:13px">当前账号无五险一金管理权限，无法导入。</span>
+      {% endif %}
+    </div>
+
+    <div class="alert alert-info" style="font-size:13px">
+      <b>说明：</b>点击「社保明细导入」按钮，按提示依次选择<b>导入月份</b>、<b>险种类型</b>并<b>上传文件</b>。
+      系统根据身份证号自动匹配<b>在职及离职人员</b>；同一员工同一期间重复导入（含文件内重复行、已导入过）会弹窗提示是否合并计算并填写备注。
+    </div>
+    <div id="result" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- 社保明细导入弹窗：月份/险种/上传 三版块 -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-upload"></i> 社保明细导入</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="padding-bottom:8px">
+        <!-- 版块一：导入月份 -->
+        <div class="import-section">
+          <div class="section-title"><span>①</span> 选择导入期间</div>
+          <div class="section-body">
+            <input type="month" id="impPeriod" class="form-control" style="max-width:220px">
+          </div>
+        </div>
+        <!-- 版块二：导入险种 -->
+        <div class="import-section">
+          <div class="section-title"><span>②</span> 选择导入险种</div>
+          <div class="section-body">
+            <select id="impType" class="form-select" style="max-width:260px">
+              <option value="">-- 请选择险种 --</option>
+              <option value="养老单位">养老单位</option>
+              <option value="养老个人">养老个人</option>
+              <option value="工伤单位">工伤单位</option>
+              <option value="医疗单位">医疗单位</option>
+              <option value="医疗个人">医疗个人</option>
+              <option value="大额医疗补助单位">大额医疗补助单位</option>
+              <option value="大额医疗补助个人">大额医疗补助个人</option>
+              <option value="生育单位">生育单位</option>
+              <option value="失业单位">失业单位</option>
+              <option value="失业个人">失业个人</option>
+              <option value="公积金单位">公积金单位</option>
+              <option value="公积金个人">公积金个人</option>
+            </select>
+          </div>
+        </div>
+        <!-- 版块三：上传 -->
+        <div class="import-section">
+          <div class="section-title"><span>③</span> 上传文件（导入说明 / 模版下载）</div>
+          <div class="section-body">
+            <div class="alert alert-warning" style="font-size:12px;margin-bottom:10px">
+              <b>导入说明：</b>请先下载模板，按模板列（序号、员工姓名、身份证号、缴费基数、应缴费额、人员编号）填写。
+              系统按身份证号匹配<b>在职及离职人员</b>，未匹配人员该行金额记为 0；同一员工同一期间重复导入可合并计算。
+            </div>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <a href="/api/insurance/template" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> 下载导入模板</a>
+              <input type="file" id="impFile" class="form-control" accept=".xlsx,.xls,.csv" style="max-width:320px">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="startImport()"><i class="bi bi-cloud-upload"></i> 开始导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 合并确认弹窗 -->
+<div class="modal fade" id="mergeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-exclamation-triangle-fill" style="color:#f59e0b"></i> 重复导入确认</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning" style="font-size:13px">
+          检测到 <b id="mergeCount">0</b> 条重复记录（同一员工同一期间：已导入过或文件内重复），是否合并计算？
+        </div>
+        <div class="text-muted mb-2" style="font-size:12px">可<b>逐人填写备注</b>（显示在汇总表备注栏；留空则不写备注）：</div>
+        <div id="mergeList" style="max-height:220px;overflow-y:auto;font-size:12px;color:#6b7280;border:1px solid #eef2f7;border-radius:6px;padding:8px"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" onclick="cancelMerge()">取消导入</button>
+        <button class="btn btn-primary" onclick="confirmMerge()"><i class="bi bi-check-lg"></i> 确认合并</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 未匹配提示弹窗 -->
+<div class="modal fade" id="unmatchedModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">导入完成</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body" id="unmatchedBody"></div>
+      <div class="modal-footer"><button class="btn btn-primary" data-bs-dismiss="modal">确定</button></div>
+    </div>
+  </div>
+</div>
+
+<style>
+.import-section{border:1px solid #eef2f7;border-radius:8px;margin-bottom:12px}
+/* 移除 overflow:hidden：避免月份选择下拉等弹层被裁切遮挡 */
+.import-section .section-title{background:#f8fafc;padding:10px 16px;font-weight:600;font-size:14px;color:#2c5aa0;border-bottom:1px solid #eef2f7;border-radius:8px 8px 0 0}
+.import-section .section-title span{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#2c5aa0;color:#fff;font-size:12px;margin-right:8px}
+.import-section .section-body{padding:14px 16px}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function openImportModal(){
+  // 默认当月
+  const now = new Date();
+  document.getElementById('impPeriod').value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  document.getElementById('impType').value = '';
+  document.getElementById('impFile').value = '';
+  document.getElementById('result').innerHTML = '';
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+
+function validateImport(){
+  if(!document.getElementById('impPeriod').value){ showToast('请选择导入期间','error'); return false; }
+  if(!document.getElementById('impType').value){ showToast('请选择险种类型','error'); return false; }
+  if(!document.getElementById('impFile').files[0]){ showToast('请选择文件','error'); return false; }
+  return true;
+}
+
+function buildForm(confirm, remarks){
+  const fd = new FormData();
+  fd.append('period', document.getElementById('impPeriod').value);
+  fd.append('insurance_type', document.getElementById('impType').value);
+  fd.append('file', document.getElementById('impFile').files[0]);
+  if(confirm){
+    fd.append('confirm', '1');
+    if(remarks && Object.keys(remarks).length){
+      fd.append('remarks', JSON.stringify(remarks));
+    }
+  }
+  return fd;
+}
+
+async function startImport(){
+  if(!validateImport()) return;
+  showToast('正在解析并匹配，请稍候…');
+  const r = await fetch('/api/insurance/import', {method:'POST', body: buildForm(false)});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+
+  if(data.need_confirm){
+    // 弹窗确认是否合并，每人可单独填写备注
+    document.getElementById('mergeCount').textContent = data.duplicates.length;
+    document.getElementById('mergeList').innerHTML = data.duplicates.map(d=>
+      `<div style="border-bottom:1px dashed #eef2f7;padding:6px 2px">
+        <div>${d.emp_name}（${d.id_card}）· 基数 ${d.base} · 应缴 ${d.amount}${d.dup_type?` · <span class="text-danger">${d.dup_type}</span>`:''}</div>
+        <div class="d-flex align-items-center gap-2 mt-1" style="max-width:500px">
+          <span style="flex:0 0 auto">备注</span>
+          <input class="form-control form-control-sm merge-remark-input" data-emp="${d.employee_id}" placeholder="该员工备注（可选）">
+        </div>
+      </div>`).join('') || '<div>无重复明细</div>';
+    window._mergeUnmatched = data.unmatched;
+    bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
+    new bootstrap.Modal(document.getElementById('mergeModal')).show();
+    return;
+  }
+
+  showImportResult(data);
+}
+
+async function confirmMerge(){
+  // 逐人收集备注（同一员工多条重复取第一个非空备注）
+  const remarks = {};
+  document.querySelectorAll('.merge-remark-input').forEach(inp=>{
+    const v = inp.value.trim();
+    const emp = inp.getAttribute('data-emp');
+    if(v && !remarks[emp]) remarks[emp] = v;
+  });
+  const r = await fetch('/api/insurance/import', {method:'POST', body: buildForm(true, remarks)});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+  bootstrap.Modal.getInstance(document.getElementById('mergeModal')).hide();
+  showImportResult(data);
+}
+
+function cancelMerge(){
+  bootstrap.Modal.getInstance(document.getElementById('mergeModal')).hide();
+}
+
+function showImportResult(data){
+  const box = document.getElementById('result');
+  let html = `<div class="alert alert-success">${data.msg}</div>`;
+  if(data.unmatched && data.unmatched.length>0){
+    html += `<div class="alert alert-warning" style="max-height:200px;overflow-y:auto">
+      <b>未匹配到人员（${data.unmatched.length} 条）：</b>
+      <ul style="margin:8px 0 0 16px">${data.unmatched.slice(0,20).map(u=>`<li>${u.name}（${u.id_card}）· 应缴 ${u.amount} · ${u.reason||'未匹配'}</li>`).join('')}</ul>
+      ${data.unmatched.length>20?`<div style="margin-top:4px">… 其余 ${data.unmatched.length-20} 条未显示</div>`:''}
+    </div>`;
+  }
+  box.innerHTML = html;
+  showToast(data.msg,'success');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,874 @@
+{% extends 'base.html' %}
+{% block page_title %}五险一金管理{% endblock %}
+{% block content %}
+<style>
+.table thead tr.table-title-row th{text-align:center;vertical-align:middle;background:#2c5aa0;color:#fff;font-weight:600;font-size:13px;padding:10px 8px;white-space:nowrap;border-bottom:none}
+.summary-table{table-layout:auto;min-width:1600px;width:auto}
+.summary-table th,.summary-table td{white-space:nowrap}
+.summary-table td{text-align:center}
+.amount-col{text-align:center}
+.total-row td{background:#1f2937;color:#fff;font-weight:700;text-align:center}
+.page-item.active .page-link{background:#2c5aa0;border-color:#2c5aa0}
+.pagination-info{font-size:13px;color:#6b7280}
+.horiz-scroll::-webkit-scrollbar{height:10px}
+.horiz-scroll::-webkit-scrollbar-thumb{background:#c7d2e0;border-radius:5px}
+.horiz-scroll::-webkit-scrollbar-track{background:#f1f5f9}
+</style>
+
+<div class="mb-3 d-flex align-items-center flex-wrap gap-2">
+  {% if can_manage_module('insurance') %}
+  <input type="month" id="lockPeriod" class="form-control form-control-sm" style="max-width:200px" title="选择要锁定/解锁的期间" onchange="refreshLockStatus()">
+  <button class="btn btn-primary btn-sm" id="lockBtn" onclick="onLockClick()"><i class="bi bi-lock-fill"></i> 汇总数据确认</button>
+  <span id="lockBadge" style="display:none;align-items:center;gap:4px;font-size:12px;color:#6d28d9;background:#ede9fe;border:1px solid #d8ccf5;border-radius:12px;padding:4px 10px"><i class="bi bi-lock-fill"></i> 已锁定，仅管理员可修改</span>
+  <button class="btn btn-outline-primary btn-sm" onclick="openImportModal()"><i class="bi bi-cloud-upload"></i> 社保明细导入</button>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-shield-check"></i> 五险一金汇总表</h5>
+      <button class="btn btn-outline-primary btn-sm" onclick="openExportModal()"><i class="bi bi-file-earmark-excel"></i> 导出汇总表数据</button>
+    </div>
+    <div class="filter-bar">
+      <label>选择期间：</label>
+      <select id="fPeriod" onchange="refreshLockStatus()"></select>
+      <button class="btn btn-outline-primary btn-sm" onclick="loadSummary()">查询</button>
+      <span style="margin-left:8px;color:#6b7280;font-size:13px">共 <b id="totalCount">0</b> 条记录</span>
+      <span class="text-muted" style="font-size:12px;margin-left:8px">选择期间后展示全部在职及离职员工，未导入数据的金额显示 0，离职员工备注显示离职时间。</span>
+    </div>
+    <!-- 横向滚动容器：底部滑块左右拖动 -->
+    <div class="table-responsive horiz-scroll" id="tableScroll">
+      <table class="table table-sm summary-table">
+        <thead><tr class="table-title-row">
+          <th>序号</th><th>客户单位</th><th>期间</th><th>员工姓名</th><th>缴费基数</th>
+          <th>养老单位</th><th>养老个人</th>
+          <th>工伤单位</th>
+          <th>医疗单位</th><th>医疗个人</th>
+          <th>大额医疗补助单位</th><th>大额医疗补助个人</th>
+          <th>生育单位</th>
+          <th>失业单位</th><th>失业个人</th>
+          <th>公积金缴费基数</th><th>缴费比例</th>
+          <th>公积金单位</th><th>公积金个人</th>
+          <th>单位缴费合计</th><th>个人缴费合计</th><th>总计</th>
+          <th>备注</th>
+          <th>操作</th>
+        </tr></thead>
+        <tbody id="listBody"></tbody>
+        <tfoot id="totalRow"></tfoot>
+      </table>
+    </div>
+    <!-- 分页 -->
+    <div class="d-flex justify-content-between align-items-center mt-3 flex-wrap gap-2" id="pagerBox" style="display:none!important">
+      <div class="pagination-info">共 <b id="pgTotal">0</b> 条 · 第 <b id="pgCur">0</b>/<span id="pgPages">0</span> 页</div>
+      <div class="d-flex align-items-center gap-2">
+        <label style="font-size:13px;color:#6b7280;margin:0">每页
+          <select id="pgSize" onchange="changePageSize()" style="font-size:13px">
+            <option value="10">10</option><option value="20" selected>20</option>
+            <option value="50">50</option><option value="100">100</option>
+          </select> 条
+        </label>
+        <ul class="pagination pagination-sm mb-0" id="pgButtons"></ul>
+        <label style="font-size:13px;color:#6b7280;margin:0">跳至
+          <input type="number" id="pgJump" min="1" style="width:60px;font-size:13px" value="1">
+          页
+        </label>
+        <button class="btn btn-outline-primary btn-sm" onclick="jumpPage()">跳转</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 社保明细导入弹窗：月份/险种/上传 三版块 -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-cloud-upload"></i> 社保明细导入</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="padding-bottom:8px">
+        <!-- 版块一：导入月份 -->
+        <div class="import-section">
+          <div class="section-title"><span>①</span> 选择导入期间</div>
+          <div class="section-body">
+            <div class="month-picker" id="impMonthBox">
+              <input type="text" id="impPeriodText" class="form-control" style="max-width:220px" placeholder="点击选择导入期间" readonly onclick="toggleImpMonthMenu(event)">
+              <input type="hidden" id="impPeriod">
+              <div class="month-menu" id="impMonthMenu" style="display:none"></div>
+            </div>
+            <div id="impLockHint" style="font-size:12px;color:#9ca3af;margin-top:6px"></div>
+          </div>
+        </div>
+        <!-- 版块二：导入险种 -->
+        <div class="import-section">
+          <div class="section-title"><span>②</span> 选择导入险种</div>
+          <div class="section-body">
+            <select id="impType" class="form-select" style="max-width:260px">
+              <option value="">-- 请选择险种 --</option>
+              <option value="养老单位">养老单位</option>
+              <option value="养老个人">养老个人</option>
+              <option value="工伤单位">工伤单位</option>
+              <option value="医疗单位">医疗单位</option>
+              <option value="医疗个人">医疗个人</option>
+              <option value="大额医疗补助单位">大额医疗补助单位</option>
+              <option value="大额医疗补助个人">大额医疗补助个人</option>
+              <option value="生育单位">生育单位</option>
+              <option value="失业单位">失业单位</option>
+              <option value="失业个人">失业个人</option>
+              <option value="公积金单位">公积金单位</option>
+              <option value="公积金个人">公积金个人</option>
+            </select>
+          </div>
+        </div>
+        <!-- 版块三：上传 -->
+        <div class="import-section">
+          <div class="section-title"><span>③</span> 上传文件（导入说明 / 模版下载）</div>
+          <div class="section-body">
+            <div class="alert alert-warning" style="font-size:12px;margin-bottom:10px">
+              <b>导入说明：</b>请先下载模板，按模板列（序号、员工姓名、身份证号、缴费基数、应缴费额、人员编号）填写。
+              按提示依次选择导入期间、险种类型并上传模版文件。系统将根据身份证号自动匹配<b>在职及离职人员</b>；
+              如文件中的身份证号为<b>脱敏格式</b>（如 532224********1125），系统将按<b>员工姓名 + 未脱敏部分号码</b>自动匹配（需唯一匹配，多人相同则列为未匹配）。
+              同一员工同一期间重复导入（含文件内重复行、已导入过）会弹窗提示是否合并计算并填写备注。
+            </div>
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <a href="/api/insurance/template" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> 下载导入模板</a>
+              <input type="file" id="impFile" class="form-control" accept=".xlsx,.xls,.csv" style="max-width:320px">
+            </div>
+          </div>
+        </div>
+        <div id="result" style="margin-top:4px"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="startImport()"><i class="bi bi-cloud-upload"></i> 开始导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 合并确认弹窗 -->
+<div class="modal fade" id="mergeModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-exclamation-triangle-fill" style="color:#f59e0b"></i> 重复导入确认</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-warning" style="font-size:13px">
+          检测到 <b id="mergeCount">0</b> 条重复记录（同一员工同一期间：已导入过或文件内重复），是否合并计算？
+        </div>
+        <div class="text-muted mb-2" style="font-size:12px">可<b>逐人填写备注</b>（显示在汇总表备注栏；留空则不写备注）：</div>
+        <div id="mergeList" style="max-height:220px;overflow-y:auto;font-size:12px;color:#6b7280;border:1px solid #eef2f7;border-radius:6px;padding:8px"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline-secondary" onclick="cancelMerge()">取消导入</button>
+        <button class="btn btn-primary" onclick="confirmMerge()"><i class="bi bi-check-lg"></i> 确认合并</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 指定人员弹窗：导入未匹配行 → 选择现有员工并写入 -->
+<div class="modal fade" id="assignModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-person-check"></i> 修改人员 — 指定到现有员工</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-info" style="font-size:12px;margin-bottom:10px">
+          将该未匹配行的金额写入您指定的员工（<b id="assignInsType"></b> · <b id="assignPeriod"></b>）。
+        </div>
+        <div class="mb-2" style="font-size:13px;color:#374151">
+          原始行：<b id="assignOriginal"></b>
+        </div>
+        <div class="mb-2">
+          <label class="modal-label">查询员工（输入姓名或身份证号）</label>
+          <div class="input-group">
+            <input id="assignEmpKw" class="form-control" placeholder="输入姓名或身份证号">
+            <button class="btn btn-outline-primary" onclick="assignSearchEmp()"><i class="bi bi-search"></i> 查询</button>
+          </div>
+        </div>
+        <div class="mb-2">
+          <label class="modal-label">选择员工</label>
+          <select id="assignEmpSel" class="form-select" size="6"></select>
+        </div>
+        <div id="assignHint" style="font-size:12px;color:#9ca3af"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" id="assignConfirmBtn" onclick="confirmAssign()" disabled>
+          <i class="bi bi-check2"></i> 确认指定
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 修改社保明细弹窗：可修改导入数据及备注 -->
+<div class="modal fade" id="insEditModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-pencil-square" style="color:#2c5aa0"></i> 修改社保明细</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="alert alert-light border mb-3" style="font-size:13px;background:#f9fafb">
+          员工：<b id="ieEmpName"></b> ｜ 期间：<b id="iePeriod"></b>
+          <span style="margin-left:10px;font-size:12px;color:#6b7280" id="ieLockHint"></span>
+        </div>
+        <div class="row g-2">
+          <div class="col-6 col-md-4"><label class="modal-label">缴费基数</label><input type="number" step="0.01" id="ieBase" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">养老单位</label><input type="number" step="0.01" id="iePensionEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">养老个人</label><input type="number" step="0.01" id="iePensionPer" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">工伤单位</label><input type="number" step="0.01" id="ieInjuryEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">医疗单位</label><input type="number" step="0.01" id="ieMedicalEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">医疗个人</label><input type="number" step="0.01" id="ieMedicalPer" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">大额医疗补助单位</label><input type="number" step="0.01" id="ieExtraMedicalEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">大额医疗补助个人</label><input type="number" step="0.01" id="ieExtraMedicalPer" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">生育单位</label><input type="number" step="0.01" id="ieMaternityEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">失业单位</label><input type="number" step="0.01" id="ieUnemploymentEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">失业个人</label><input type="number" step="0.01" id="ieUnemploymentPer" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">公积金缴费基数</label><input type="number" step="0.01" id="ieFundBase" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">缴费比例(%)</label><input type="number" step="0.01" id="ieFundRate" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">公积金单位</label><input type="number" step="0.01" id="ieFundEmp" class="form-control form-control-sm"></div>
+          <div class="col-6 col-md-4"><label class="modal-label">公积金个人</label><input type="number" step="0.01" id="ieFundPer" class="form-control form-control-sm"></div>
+          <div class="col-12"><label class="modal-label">备注</label><textarea id="ieRemark" class="form-control form-control-sm" rows="2"></textarea></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" id="ieSaveBtn" onclick="saveInsEdit()"><i class="bi bi-check2"></i> 保存修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 导出弹窗：按人员+时间段 或 按月份全员 -->
+<div class="modal fade" id="exportModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title"><i class="bi bi-file-earmark-excel"></i> 导出汇总表数据</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="modal-label">导出方式</label>
+          <select id="expMode" class="form-select" onchange="toggleExpMode()">
+            <option value="month">按月份全员导出</option>
+            <option value="range">按人员及时间段导出</option>
+          </select>
+        </div>
+        <!-- 按月份全员 -->
+        <div id="expMonthBox">
+          <div class="mb-3"><label class="modal-label">选择月份</label>
+            <input type="month" id="expPeriod" class="form-control"></div>
+        </div>
+        <!-- 按人员+时间段 -->
+        <div id="expRangeBox" style="display:none">
+          <div class="mb-3">
+            <label class="modal-label">选择人员（可输入姓名或身份证号查询）</label>
+            <div class="input-group">
+              <input id="expEmpSearch" class="form-control" placeholder="输入姓名或身份证号查询">
+              <button class="btn btn-outline-primary" onclick="searchEmp()"><i class="bi bi-search"></i> 查询</button>
+            </div>
+            <select id="expEmployee" class="form-select mt-2"><option value="">-- 请选择查询到的员工 --</option></select>
+          </div>
+          <div class="row">
+            <div class="col-6 mb-3"><label class="modal-label">开始月份</label><input type="month" id="expStart" class="form-control"></div>
+            <div class="col-6 mb-3"><label class="modal-label">结束月份</label><input type="month" id="expEnd" class="form-control"></div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="doExport()"><i class="bi bi-download"></i> 导出</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+.import-section{border:1px solid #eef2f7;border-radius:8px;margin-bottom:12px}
+/* 移除 overflow:hidden：避免月份下拉菜单(.month-menu)展开时被裁切遮挡 */
+.import-section .section-title{background:#f8fafc;padding:10px 16px;font-weight:600;font-size:14px;color:#2c5aa0;border-bottom:1px solid #eef2f7;border-radius:8px 8px 0 0}
+.import-section .section-title span{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#2c5aa0;color:#fff;font-size:12px;margin-right:8px}
+.import-section .section-body{padding:14px 16px}
+.month-picker{position:relative;display:inline-block}
+.month-menu{position:absolute;z-index:1060;top:calc(100% + 4px);left:0;width:220px;max-height:260px;overflow-y:auto;background:#fff;border:1px solid #d8e0ea;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:4px}
+.month-item{padding:8px 10px;border-radius:6px;cursor:pointer;font-size:13px;color:#374151}
+.month-item:hover{background:#eef2f7}
+.month-item.locked{color:#9ca3af;cursor:not-allowed;background:#f9fafb}
+.month-item.locked:hover{background:#f9fafb}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let employeesCache = [];
+let allSummaryItems = [];   // 当前查询的完整数据
+let pgCurrent = 1;          // 当前页
+let pgPageSize = 20;        // 每页条数（默认 20）
+// 是否可管理五险一金（用于显示「修改」按钮）
+const CAN_MANAGE_INSURANCE = {{ 'true' if can_manage_module('insurance') else 'false' }};
+
+async function loadPeriods(){
+  const data = await api('/api/insurance/periods');
+  if(!data) return;
+  const sel = document.getElementById('fPeriod');
+  sel.innerHTML = '<option value="">全部期间</option>' + data.items.map(p=>`<option value="${p}">${p}</option>`).join('');
+}
+
+function fmt(v){ return parseFloat(v||0).toFixed(2); }
+
+// ================= 汇总数据确认（期间锁定） =================
+const IS_ADMIN = {{ 'true' if current_user.role == 'admin' else 'false' }};
+let lockState = {locked:false, period:''};
+
+function currentLockPeriod(){
+  return document.getElementById('lockPeriod').value || (new Date().getFullYear() + '-' + String(new Date().getMonth()+1).padStart(2,'0'));
+}
+
+async function refreshLockStatus(){
+  const p = currentLockPeriod();
+  const data = await api('/api/insurance/lock/status?period=' + encodeURIComponent(p));
+  if(!data) return;
+  lockState = {locked: data.locked, period: p};
+  const btn = document.getElementById('lockBtn');
+  const badge = document.getElementById('lockBadge');
+  if(data.locked){
+    badge.style.display = 'inline-flex';
+    badge.innerHTML = `<i class="bi bi-lock-fill"></i> ${p} 已锁定，仅管理员可修改`;
+    if(IS_ADMIN){
+      btn.innerHTML = '<i class="bi bi-unlock-fill"></i> 解除锁定';
+      btn.disabled = false;
+    } else {
+      btn.innerHTML = '<i class="bi bi-lock-fill"></i> 已锁定';
+      btn.disabled = true;
+    }
+  } else {
+    badge.style.display = 'none';
+    btn.innerHTML = '<i class="bi bi-lock-fill"></i> 汇总数据确认';
+    btn.disabled = false;
+  }
+}
+
+function onLockClick(){
+  const p = currentLockPeriod();
+  if(lockState.locked){
+    if(IS_ADMIN){
+      confirmAction(`确定解除 ${p} 的社保数据锁定吗？解除后所有账号均可修改。`, ()=>{ doUnlock(p); }, true);
+    }
+    return;
+  }
+  // 三次弹窗确认
+  confirmAction(`第 1 次确认：确定对 <b>${p}</b> 进行汇总数据确认吗？`, ()=>{
+    confirmAction(`第 2 次确认：锁定后除管理员外其他账号将<b>不能修改、编辑</b> ${p} 的社保数据！`, ()=>{
+      confirmAction(`第 3 次确认：确定锁定 <b>${p}</b> 社保数据？`, ()=>{ doLock(p); }, true);
+    }, true);
+  }, false);
+}
+
+async function doLock(period){
+  const r = await api('/api/insurance/lock', {method:'POST', body:{period:period}});
+  if(r){ showToast(r.msg||'已锁定','success'); refreshLockStatus(); loadSummary(); }
+}
+
+async function doUnlock(period){
+  const r = await api('/api/insurance/unlock', {method:'POST', body:{period:period}});
+  if(r){ showToast(r.msg||'已解锁','success'); refreshLockStatus(); }
+}
+
+// ================= 汇总表加载 + 前端分页 =================
+async function loadSummary(){
+  const period = document.getElementById('fPeriod').value;
+  const data = await api('/api/insurance/summary?period='+period);
+  if(!data) return;
+  allSummaryItems = data.items;
+  document.getElementById('totalCount').textContent = data.count;
+  document.getElementById('totalRow').innerHTML = buildTotalRow(data.total, data.count);
+  pgCurrent = 1;
+  renderPage();
+}
+
+function buildTotalRow(t, count){
+  return `<tr class="total-row">
+    <td colspan="4">合计（${count}条）</td><td>${fmt(t.base)}</td>
+    <td>${fmt(t.pension_emp)}</td><td>${fmt(t.pension_per)}</td>
+    <td>${fmt(t.injury_emp)}</td>
+    <td>${fmt(t.medical_emp)}</td><td>${fmt(t.medical_per)}</td>
+    <td>${fmt(t.extra_medical_emp)}</td><td>${fmt(t.extra_medical_per)}</td>
+    <td>${fmt(t.maternity_emp)}</td>
+    <td>${fmt(t.unemployment_emp)}</td><td>${fmt(t.unemployment_per)}</td>
+    <td>${fmt(t.fund_base)}</td><td></td>
+    <td>${fmt(t.fund_emp)}</td><td>${fmt(t.fund_per)}</td>
+    <td>${fmt(t.unit_total)}</td><td>${fmt(t.per_total)}</td><td>${fmt(t.grand_total)}</td>
+    <td></td>
+    <td></td>
+  </tr>`;
+}
+
+function renderRow(d){
+  // 操作列：有明细(id)才可修改；HR/管理员显示（权限由 can_manage_module 控制，页面已按模块权限渲染）
+  let op = '<span style="color:#cbd5e1">-</span>';
+  if(d.id && CAN_MANAGE_INSURANCE){
+    op = `<button class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size:11px" onclick="openInsEdit(${d.id})" title="修改该项社保明细及备注"><i class="bi bi-pencil"></i> 修改</button>`;
+  }
+  return `<tr>
+    <td>${d.seq}</td>
+    <td>${d.department||'-'}</td><td>${d.period}</td><td>${d.emp_name||'-'}</td>
+    <td>${fmt(d.base)}</td>
+    <td>${fmt(d.pension_emp)}</td><td>${fmt(d.pension_per)}</td>
+    <td>${fmt(d.injury_emp)}</td>
+    <td>${fmt(d.medical_emp)}</td><td>${fmt(d.medical_per)}</td>
+    <td>${fmt(d.extra_medical_emp)}</td><td>${fmt(d.extra_medical_per)}</td>
+    <td>${fmt(d.maternity_emp)}</td>
+    <td>${fmt(d.unemployment_emp)}</td><td>${fmt(d.unemployment_per)}</td>
+    <td>${fmt(d.fund_base)}</td><td>${d.fund_rate?fmt(d.fund_rate):'0.00'}</td>
+    <td>${fmt(d.fund_emp)}</td><td>${fmt(d.fund_per)}</td>
+    <td><b>${fmt(d.unit_total)}</b></td><td><b>${fmt(d.per_total)}</b></td>
+    <td><b>${fmt(d.grand_total)}</b></td>
+    <td>${d.remark||'-'}</td>
+    <td>${op}</td>
+  </tr>`;
+}
+
+function renderPage(){
+  const tb = document.getElementById('listBody');
+  if(allSummaryItems.length===0){
+    tb.innerHTML='<tr><td colspan="24" class="empty">暂无数据</td></tr>';
+    document.getElementById('pagerBox').style.display='none';
+    document.getElementById('totalRow').innerHTML='';
+    return;
+  }
+  const totalPages = Math.max(1, Math.ceil(allSummaryItems.length / pgPageSize));
+  if(pgCurrent > totalPages) pgCurrent = totalPages;
+  const start = (pgCurrent-1)*pgPageSize;
+  const pageItems = allSummaryItems.slice(start, start+pgPageSize);
+  tb.innerHTML = pageItems.map(renderRow).join('');
+  renderPager(totalPages);
+}
+
+function renderPager(totalPages){
+  const box = document.getElementById('pagerBox');
+  box.style.display = '';
+  document.getElementById('pgTotal').textContent = allSummaryItems.length;
+  document.getElementById('pgCur').textContent = pgCurrent;
+  document.getElementById('pgPages').textContent = totalPages;
+  document.getElementById('pgJump').value = pgCurrent;
+
+  let btn = '';
+  const page = pgCurrent;
+  // 页码窗口
+  let start = Math.max(1, page-2);
+  let end = Math.min(totalPages, page+2);
+  if(page-2 < 1) end = Math.min(totalPages, end + (1-(page-2)));
+  if(page+2 > totalPages) start = Math.max(1, start - (page+2-totalPages));
+  btn += `<li class="page-item ${page<=1?'disabled':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${page-1})">&laquo;</a></li>`;
+  if(start>1) btn += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goPage(1)">1</a></li>`;
+  if(start>2) btn += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+  for(let i=start; i<=end; i++){
+    btn += `<li class="page-item ${i===page?'active':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${i})">${i}</a></li>`;
+  }
+  if(end<totalPages-1) btn += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+  if(end<totalPages) btn += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goPage(${totalPages})">${totalPages}</a></li>`;
+  btn += `<li class="page-item ${page>=totalPages?'disabled':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${page+1})">&raquo;</a></li>`;
+  document.getElementById('pgButtons').innerHTML = btn;
+}
+
+function goPage(p){
+  const totalPages = Math.max(1, Math.ceil(allSummaryItems.length / pgPageSize));
+  if(p<1 || p>totalPages) return;
+  pgCurrent = p;
+  renderPage();
+}
+
+function jumpPage(){
+  const v = parseInt(document.getElementById('pgJump').value);
+  if(!v || v<1) return;
+  goPage(v);
+}
+
+function changePageSize(){
+  pgPageSize = parseInt(document.getElementById('pgSize').value) || 20;
+  pgCurrent = 1;
+  renderPage();
+}
+
+// ================= 社保明细导入（直接弹窗） =================
+let lockedPeriodsSet = [];
+function openImportModal(){
+  // 默认导入月份 = 当前月份
+  const now = new Date();
+  const cur = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  document.getElementById('impType').value = '';
+  document.getElementById('impFile').value = '';
+  document.getElementById('result').innerHTML = '';
+  // 拉取已锁定月份，禁用锁定月份
+  api('/api/insurance/lock/list').then(ld=>{
+    lockedPeriodsSet = ld ? ld.locked_periods : [];
+    buildImpMonthMenu();
+    const hint = document.getElementById('impLockHint');
+    if(lockedPeriodsSet.includes(cur)){
+      document.getElementById('impPeriod').value = '';
+      document.getElementById('impPeriodText').value = '';
+      hint.innerHTML = `<span class="text-danger">⚠ 当前月份（${cur}）已锁定，请选择其他未锁定的月份</span>`;
+    } else {
+      document.getElementById('impPeriod').value = cur;
+      document.getElementById('impPeriodText').value = cur;
+      hint.innerHTML = lockedPeriodsSet.length
+        ? `已锁定期间不可选择：${lockedPeriodsSet.join('、')}` : '';
+    }
+  });
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+
+function buildImpMonthMenu(){
+  const now = new Date();
+  const html = [];
+  for(let y=now.getFullYear(); y>=now.getFullYear()-2; y--){
+    for(let m=12; m>=1; m--){
+      if(y===now.getFullYear() && m>now.getMonth()+1) continue;
+      const val = `${y}-${String(m).padStart(2,'0')}`;
+      const locked = lockedPeriodsSet.includes(val);
+      html.push(`<div class="month-item ${locked?'locked':''}" ${locked?'title="该月份已锁定，仅管理员可修改"':''} onclick="${locked?'return false;':`selectImpMonth('${val}')`}">${y}年${m}月 ${locked?'🔒':''}</div>`);
+    }
+  }
+  document.getElementById('impMonthMenu').innerHTML = html.join('');
+}
+
+function toggleImpMonthMenu(e){
+  e.stopPropagation();
+  const menu = document.getElementById('impMonthMenu');
+  menu.style.display = menu.style.display==='none' ? 'block' : 'none';
+}
+
+function selectImpMonth(val){
+  document.getElementById('impPeriod').value = val;
+  document.getElementById('impPeriodText').value = val;
+  document.getElementById('impMonthMenu').style.display = 'none';
+  document.getElementById('impLockHint').innerHTML = lockedPeriodsSet.length
+    ? `已锁定期间不可选择：${lockedPeriodsSet.join('、')}` : '';
+}
+
+document.addEventListener('click', function(e){
+  const box = document.getElementById('impMonthBox');
+  if(box && !box.contains(e.target)) document.getElementById('impMonthMenu').style.display='none';
+});
+
+function validateImport(){
+  if(!document.getElementById('impPeriod').value){ showToast('请选择导入期间','error'); return false; }
+  if(!document.getElementById('impType').value){ showToast('请选择险种类型','error'); return false; }
+  if(!document.getElementById('impFile').files[0]){ showToast('请选择文件','error'); return false; }
+  return true;
+}
+
+function buildForm(confirm, remarks){
+  const fd = new FormData();
+  fd.append('period', document.getElementById('impPeriod').value);
+  fd.append('insurance_type', document.getElementById('impType').value);
+  fd.append('file', document.getElementById('impFile').files[0]);
+  if(confirm){
+    fd.append('confirm', '1');
+    if(remarks && Object.keys(remarks).length){
+      fd.append('remarks', JSON.stringify(remarks));
+    }
+  }
+  return fd;
+}
+
+async function startImport(){
+  if(!validateImport()) return;
+  currentImportType = document.getElementById('impType').value;
+  showToast('正在解析并匹配，请稍候…');
+  const r = await fetch('/api/insurance/import', {method:'POST', body: buildForm(false)});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+
+  if(data.need_confirm){
+    // 弹窗确认是否合并，每人可单独填写备注
+    document.getElementById('mergeCount').textContent = data.duplicates.length;
+    document.getElementById('mergeList').innerHTML = data.duplicates.map(d=>
+      `<div style="border-bottom:1px dashed #eef2f7;padding:6px 2px">
+        <div>${d.emp_name}（${d.id_card}）· 基数 ${d.base} · 应缴 ${d.amount}${d.dup_type?` · <span class="text-danger">${d.dup_type}</span>`:''}</div>
+        <div class="d-flex align-items-center gap-2 mt-1" style="max-width:500px">
+          <span style="flex:0 0 auto">备注</span>
+          <input class="form-control form-control-sm merge-remark-input" data-emp="${d.employee_id}" placeholder="该员工备注（可选）">
+        </div>
+      </div>`).join('') || '<div>无重复明细</div>';
+    new bootstrap.Modal(document.getElementById('mergeModal')).show();
+    return;
+  }
+  currentUnmatched = data.unmatched || [];
+  showImportResult(data);
+}
+
+async function confirmMerge(){
+  // 逐人收集备注（同一员工多条重复取第一个非空备注）
+  const remarks = {};
+  document.querySelectorAll('.merge-remark-input').forEach(inp=>{
+    const v = inp.value.trim();
+    const emp = inp.getAttribute('data-emp');
+    if(v && !remarks[emp]) remarks[emp] = v;
+  });
+  const r = await fetch('/api/insurance/import', {method:'POST', body: buildForm(true, remarks)});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+  bootstrap.Modal.getInstance(document.getElementById('mergeModal')).hide();
+  currentUnmatched = data.unmatched || [];
+  showImportResult(data);
+}
+
+function cancelMerge(){
+  bootstrap.Modal.getInstance(document.getElementById('mergeModal')).hide();
+}
+
+function showImportResult(data){
+  const box = document.getElementById('result');
+  let html = `<div class="alert alert-success" style="font-size:13px;margin-bottom:4px">${data.msg}</div>`;
+  if(data.unmatched && data.unmatched.length>0){
+    const list = data.unmatched;
+    const period = document.getElementById('impPeriod').value || '';
+    html += `<div class="alert alert-warning" style="font-size:12px;margin-bottom:0">
+      <div class="d-flex justify-content-between align-items-center">
+        <b>未匹配到人员（${list.length} 条）：</b>
+        <span style="font-size:11px;color:#6b7280">可点击「指定人员」将该行金额写入现有员工</span>
+      </div>
+      <ul class="unmatched-list" style="margin:6px 0 0 16px;padding:0;list-style:none">
+        ${list.slice(0,50).map((u,i)=>`<li class="unmatched-item" data-idx="${i}" style="padding:5px 0;border-bottom:1px dashed #e5e7eb;display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            ${u.name}（${u.id_card}）· 基数 ${u.base||0} · 应缴 ${u.amount||0}${u.fund_rate?` · 比例 ${u.fund_rate}`:''}${u.person_no?` · 编号 ${u.person_no}`:''} · ${u.reason||'未匹配'}
+          </span>
+          <button class="btn btn-outline-primary btn-sm py-0 px-2" style="font-size:11px" onclick="openAssignModal(${i}, ${JSON.stringify(u).replace(/"/g,'&quot;')}, '${period}', '${currentImportType||''}')">
+            <i class="bi bi-person-check"></i> 指定人员
+          </button>
+        </li>`).join('')}
+      </ul>
+      ${list.length>50?`<div style="margin-top:4px">… 其余 ${list.length-50} 条未显示（请下载模板检查或导入后到「社保明细」模块补录）</div>`:''}
+    </div>`;
+  }
+  box.innerHTML = html;
+  showToast(data.msg,'success');
+  // 导入完成后刷新汇总
+  loadSummary();
+}
+
+// ================= 指定人员（修改人员） =================
+let currentImportType = '';   // 当前导入的险种类型
+let currentUnmatched = [];    // 最近一次导入的未匹配行
+let currentAssignRow = null;  // 当前正在指定的未匹配行
+let currentAssignIdx = -1;    // 当前正在指定的未匹配行在 currentUnmatched 中的索引
+
+function openAssignModal(idx, row, period, insType){
+  currentAssignRow = row;
+  currentAssignIdx = idx;
+  document.getElementById('assignInsType').textContent = insType || '-';
+  document.getElementById('assignPeriod').textContent = period || '-';
+  document.getElementById('assignOriginal').textContent =
+    `${row.name}（${row.id_card}）· 基数 ${row.base||0} · 应缴 ${row.amount||0}${row.fund_rate?` · 比例 ${row.fund_rate}`:''}`;
+  document.getElementById('assignEmpKw').value = row.name || '';
+  document.getElementById('assignEmpSel').innerHTML = '<option value="">-- 请先查询 --</option>';
+  document.getElementById('assignConfirmBtn').disabled = true;
+  document.getElementById('assignHint').textContent = '';
+  new bootstrap.Modal(document.getElementById('assignModal')).show();
+  // 自动按姓名查一次
+  assignSearchEmp();
+}
+
+async function assignSearchEmp(){
+  const kw = document.getElementById('assignEmpKw').value.trim();
+  if(!kw){ showToast('请输入姓名或身份证号','error'); return; }
+  const data = await api('/api/employees?status=在职&keyword='+encodeURIComponent(kw));
+  const sel = document.getElementById('assignEmpSel');
+  const hint = document.getElementById('assignHint');
+  if(!data){ sel.innerHTML='<option value="">-- 查询失败 --</option>'; return; }
+  if(data.items.length===0){
+    sel.innerHTML = '<option value="">-- 未找到匹配员工 --</option>';
+    hint.textContent = '提示：离职员工请先在「员工信息管理」恢复为在职后再指定。';
+    document.getElementById('assignConfirmBtn').disabled = true;
+    return;
+  }
+  sel.innerHTML = data.items.map(e=>`<option value="${e.id}">${e.name}（${e.id_card||'-'}）· ${e.department||'-'}</option>`).join('');
+  hint.textContent = `查询到 ${data.items.length} 位员工，请选择一位并确认。`;
+  document.getElementById('assignConfirmBtn').disabled = false;
+  sel.onchange = ()=>{ /* 选中即可确认 */ };
+}
+
+async function confirmAssign(){
+  if(!currentAssignRow) return;
+  const empId = document.getElementById('assignEmpSel').value;
+  if(!empId){ showToast('请先选择员工','error'); return; }
+  const period = document.getElementById('assignPeriod').textContent;
+  const body = {
+    period: period,
+    insurance_type: currentImportType,
+    base: currentAssignRow.base,
+    amount: currentAssignRow.amount,
+    person_no: currentAssignRow.person_no,
+    fund_rate: currentAssignRow.fund_rate,
+    target_employee_id: parseInt(empId),
+  };
+  const btn = document.getElementById('assignConfirmBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 处理中…';
+  const r = await api('/api/insurance/assign', {method:'POST', body});
+  btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2"></i> 确认指定';
+  if(r){
+    bootstrap.Modal.getInstance(document.getElementById('assignModal')).hide();
+    showToast(r.msg || '已指定人员并写入','success');
+    // 从未匹配列表中按索引移除该行
+    if(currentAssignIdx >= 0 && currentAssignIdx < currentUnmatched.length){
+      currentUnmatched.splice(currentAssignIdx, 1);
+    }
+    currentAssignIdx = -1;
+    currentAssignRow = null;
+    rerenderUnmatched();
+    loadSummary();
+  }
+}
+
+function rerenderUnmatched(){
+  if(!currentUnmatched || currentUnmatched.length===0){
+    document.getElementById('result').innerHTML = '<div class="alert alert-success" style="font-size:13px">所有未匹配行已处理完毕。</div>';
+    return;
+  }
+  showImportResult({msg:'已处理部分未匹配行，剩余：', unmatched: currentUnmatched});
+}
+
+// ================= 修改社保明细（数据 + 备注） =================
+let currentInsEditId = null;
+
+async function openInsEdit(id){
+  // 从已加载数据中取该明细（避免 JSON 序列化拼入 onclick 的注入风险）
+  const d = allSummaryItems.find(i => i.id === id);
+  if(!d){ showToast('未找到该明细数据，请刷新后重试','error'); return; }
+  currentInsEditId = id;
+  document.getElementById('ieEmpName').textContent = d.emp_name || '';
+  document.getElementById('iePeriod').textContent = d.period || '';
+  document.getElementById('ieBase').value = d.base || 0;
+  document.getElementById('iePensionEmp').value = d.pension_emp || 0;
+  document.getElementById('iePensionPer').value = d.pension_per || 0;
+  document.getElementById('ieInjuryEmp').value = d.injury_emp || 0;
+  document.getElementById('ieMedicalEmp').value = d.medical_emp || 0;
+  document.getElementById('ieMedicalPer').value = d.medical_per || 0;
+  document.getElementById('ieExtraMedicalEmp').value = d.extra_medical_emp || 0;
+  document.getElementById('ieExtraMedicalPer').value = d.extra_medical_per || 0;
+  document.getElementById('ieMaternityEmp').value = d.maternity_emp || 0;
+  document.getElementById('ieUnemploymentEmp').value = d.unemployment_emp || 0;
+  document.getElementById('ieUnemploymentPer').value = d.unemployment_per || 0;
+  document.getElementById('ieFundBase').value = d.fund_base || 0;
+  document.getElementById('ieFundRate').value = d.fund_rate || 0;
+  document.getElementById('ieFundEmp').value = d.fund_emp || 0;
+  document.getElementById('ieFundPer').value = d.fund_per || 0;
+  document.getElementById('ieRemark').value = d.remark || '';
+  const hint = document.getElementById('ieLockHint');
+  hint.textContent = '';
+  new bootstrap.Modal(document.getElementById('insEditModal')).show();
+  // 检查期间锁定状态：锁定期仅管理员可改
+  const st = await api('/api/insurance/lock/status?period=' + encodeURIComponent(d.period || ''));
+  if(st && st.locked){
+    if(IS_ADMIN){
+      hint.innerHTML = '<span class="badge-status badge-priority-high">该期间已锁定（管理员可修改）</span>';
+    } else {
+      hint.innerHTML = '<span class="badge-status badge-expired">该期间已锁定，仅管理员可修改</span>';
+      document.querySelectorAll('#insEditModal .form-control').forEach(inp=>{ inp.disabled = true; });
+    }
+  } else {
+    document.querySelectorAll('#insEditModal .form-control').forEach(inp=>{ inp.disabled = false; });
+  }
+}
+
+async function saveInsEdit(){
+  if(!currentInsEditId) return;
+  const g = id => document.getElementById(id).value;
+  const body = {
+    base: g('ieBase'),
+    pension_emp: g('iePensionEmp'), pension_per: g('iePensionPer'),
+    injury_emp: g('ieInjuryEmp'), medical_emp: g('ieMedicalEmp'), medical_per: g('ieMedicalPer'),
+    extra_medical_emp: g('ieExtraMedicalEmp'), extra_medical_per: g('ieExtraMedicalPer'),
+    maternity_emp: g('ieMaternityEmp'), unemployment_emp: g('ieUnemploymentEmp'), unemployment_per: g('ieUnemploymentPer'),
+    fund_base: g('ieFundBase'), fund_rate: g('ieFundRate'), fund_emp: g('ieFundEmp'), fund_per: g('ieFundPer'),
+    remark: g('ieRemark'),
+  };
+  const btn = document.getElementById('ieSaveBtn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中…';
+  const r = await api('/api/insurance/' + currentInsEditId, {method:'PUT', body});
+  btn.disabled = false; btn.innerHTML = '<i class="bi bi-check2"></i> 保存修改';
+  if(r){
+    bootstrap.Modal.getInstance(document.getElementById('insEditModal')).hide();
+    showToast(r.msg || '已保存','success');
+    loadSummary();
+  }
+}
+
+// ================= 导出（人员可搜索） =================
+function openExportModal(){
+  const now = new Date();
+  document.getElementById('expPeriod').value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  document.getElementById('expStart').value = '';
+  document.getElementById('expEnd').value = '';
+  document.getElementById('expMode').value = 'month';
+  document.getElementById('expEmpSearch').value = '';
+  document.getElementById('expEmployee').innerHTML = '<option value="">-- 请选择查询到的员工 --</option>';
+  toggleExpMode();
+  new bootstrap.Modal(document.getElementById('exportModal')).show();
+}
+
+function toggleExpMode(){
+  const mode = document.getElementById('expMode').value;
+  document.getElementById('expMonthBox').style.display = mode==='month' ? '' : 'none';
+  document.getElementById('expRangeBox').style.display = mode==='range' ? '' : 'none';
+}
+
+async function searchEmp(){
+  const kw = document.getElementById('expEmpSearch').value.trim();
+  if(!kw){ showToast('请输入姓名或身份证号','error'); return; }
+  const data = await api('/api/employees?status=在职&keyword='+encodeURIComponent(kw));
+  if(!data) return;
+  const sel = document.getElementById('expEmployee');
+  if(data.items.length===0){
+    sel.innerHTML = '<option value="">-- 未找到匹配员工 --</option>';
+    return;
+  }
+  sel.innerHTML = data.items.map(e=>`<option value="${e.id}">${e.name}（${e.id_card||'-'}）· ${e.department||'-'}</option>`).join('');
+  showToast(`查询到 ${data.items.length} 位员工`,'success');
+}
+
+// 回车触发查询
+document.addEventListener('keydown', function(e){
+  if(e.key==='Enter' && document.getElementById('expEmpSearch')===document.activeElement){
+    searchEmp();
+  }
+  if(e.key==='Enter' && document.getElementById('assignEmpKw')===document.activeElement){
+    assignSearchEmp();
+  }
+});
+
+function doExport(){
+  const mode = document.getElementById('expMode').value;
+  let url = '/api/insurance/summary/export?';
+  if(mode==='month'){
+    const p = document.getElementById('expPeriod').value;
+    if(!p){ showToast('请选择月份','error'); return; }
+    url += 'period=' + encodeURIComponent(p);
+  } else {
+    const emp = document.getElementById('expEmployee').value;
+    const s = document.getElementById('expStart').value;
+    const e = document.getElementById('expEnd').value;
+    if(!s || !e){ showToast('请选择开始和结束月份','error'); return; }
+    if(s > e){ showToast('开始月份不能晚于结束月份','error'); return; }
+    if(emp) url += 'employee_id=' + emp + '&';
+    url += 'start=' + encodeURIComponent(s) + '&end=' + encodeURIComponent(e);
+  }
+  bootstrap.Modal.getInstance(document.getElementById('exportModal')).hide();
+  location.href = url;
+}
+
+loadPeriods().then(()=>{
+  const now = new Date();
+  document.getElementById('lockPeriod').value = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  loadSummary(); refreshLockStatus();
+});
+</script>
+{% endblock %}

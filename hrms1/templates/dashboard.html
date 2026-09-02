@@ -1,0 +1,371 @@
+{% extends 'base.html' %}
+{% block page_title %}工作看板{% endblock %}
+{% block content %}
+<style>
+@keyframes toastIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+</style>
+<div class="row row-cols-2 row-cols-md-5 g-3 mb-4">
+  <div class="col"><a href="{{ url_for('lifecycle_page') }}?status=在职" style="text-decoration:none;color:inherit"><div class="stat-card success"><div class="label"><i class="bi bi-person-check"></i> 在职人数</div><div class="num">{{ in_service }}</div><div style="font-size:12px;color:#9ca3af;margin-top:6px">点击查看在职台账 →</div></div></a></div>
+  <div class="col"><a href="{{ url_for('lifecycle_page') }}?status=离职" style="text-decoration:none;color:inherit"><div class="stat-card danger"><div class="label"><i class="bi bi-person-dash"></i> 离职人数</div><div class="num">{{ resigned }}</div><div style="font-size:12px;color:#9ca3af;margin-top:6px">点击查看离职台账 →</div></div></a></div>
+  <div class="col"><a href="{{ url_for('lifecycle_page') }}?status=退休" style="text-decoration:none;color:inherit"><div class="stat-card retired"><div class="label"><i class="bi bi-person-standing"></i> 退休人数</div><div class="num">{{ retired }}</div><div style="font-size:12px;color:#9ca3af;margin-top:6px">点击查看退休台账 →</div></div></a></div>
+  <div class="col"><a href="{{ url_for('lifecycle_page') }}?period=month_hired" style="text-decoration:none;color:inherit"><div class="stat-card"><div class="label"><i class="bi bi-person-add"></i> 本月入职</div><div class="num">{{ new_hires }}</div><div style="font-size:12px;color:#9ca3af;margin-top:6px">点击查看本月入职台账 →</div></div></a></div>
+  <div class="col"><a href="{{ url_for('lifecycle_page') }}?period=month_left" style="text-decoration:none;color:inherit"><div class="stat-card warn"><div class="label"><i class="bi bi-door-open"></i> 本月离职</div><div class="num">{{ leavers }}</div><div style="font-size:12px;color:#9ca3af;margin-top:6px">点击查看本月离职台账 →</div></div></a></div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-7">
+    <div class="card">
+      <div class="card-body">
+        <h5 style="margin:0 0 16px;font-weight:700"><i class="bi bi-exclamation-triangle" style="color:#f59e0b"></i> 合同到期提醒</h5>
+        <div id="expiringWrap">
+          <div id="expiringBody"></div>
+          <div id="expiringPager" class="d-flex justify-content-between align-items-center mt-2" style="display:none">
+            <div style="font-size:12px;color:#9ca3af">共 <span id="expiringTotal">0</span> 条，每页
+              <select id="expiringSize" class="form-select form-select-sm" style="display:inline-block;width:auto" onchange="expiringPage=1;renderExpiring()">
+                <option selected>10</option><option>20</option><option>50</option><option>100</option>
+              </select> 条
+            </div>
+            <div id="expiringPages" class="btn-group btn-group-sm"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 当月生日提醒 -->
+    <div class="card mt-3">
+      <div class="card-body">
+        <h5 style="margin:0 0 16px;font-weight:700"><i class="bi bi-cake2" style="color:#db2777"></i> 当月生日提醒（{{ today.month }}月）</h5>
+        <div id="birthdayBody"></div>
+        <div id="birthdayPager" class="d-flex justify-content-between align-items-center mt-2" style="display:none">
+          <div style="font-size:12px;color:#9ca3af">共 <span id="birthdayTotal">0</span> 条，每页
+            <select id="birthdaySize" class="form-select form-select-sm" style="display:inline-block;width:auto" onchange="birthdayPage=1;renderBirthdays()">
+              <option selected>10</option><option>20</option><option>50</option><option>100</option>
+            </select> 条
+          </div>
+          <div id="birthdayPages" class="btn-group btn-group-sm"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <h5 style="margin:0;font-weight:700"><i class="bi bi-calendar3" style="color:#2c5aa0"></i> 我的待办</h5>
+          <button class="btn btn-primary btn-sm" onclick="openTodoModal()"><i class="bi bi-plus-lg"></i> 新增待办</button>
+        </div>
+        <!-- 月历 -->
+        <div id="todoCalendar"></div>
+        <!-- 选中日期的待办列表 -->
+        <div id="dayTodos" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新增待办弹窗 -->
+<div class="modal fade" id="todoModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">新增待办</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="tmId">
+        <div class="mb-3"><label class="modal-label">标题</label><input id="tmTitle" class="form-control"></div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">截止日期</label><input type="date" id="tmDue" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">优先级</label>
+            <select id="tmPriority" class="form-select"><option>高</option><option selected>中</option><option>低</option></select>
+          </div>
+        </div>
+        <div class="mb-3"><label class="modal-label">提醒次数</label>
+          <select id="tmCount" class="form-select">
+            <option value="1">1 次</option>
+            <option value="2">2 次</option>
+            <option value="3" selected>3 次</option>
+            <option value="5">5 次</option>
+            <option value="10">10 次</option>
+          </select>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">提醒开始</label><input type="datetime-local" id="tmStart" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">提醒结束</label><input type="datetime-local" id="tmEnd" class="form-control"></div>
+        </div>
+        <div class="alert alert-info" style="font-size:12px">在「提醒开始 ~ 结束」时间段内，提醒次数将均匀分配、间隔弹出（不连续）；提前完成或删除待办即停止提醒。</div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-primary" onclick="saveTodo()">保存</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ================= 工作看板提醒分页 =================
+const expiringData = {{ expiring|tojson }};
+const birthdayData = {{ birthdays|tojson }};
+let expiringPage = 1, expiringSize = 10;
+let birthdayPage = 1, birthdaySize = 10;
+
+function renderExpiring(){
+  const total = expiringData.length;
+  const size = parseInt(document.getElementById('expiringSize').value);
+  const pages = Math.max(1, Math.ceil(total / size));
+  if(expiringPage > pages) expiringPage = pages;
+  const start = (expiringPage - 1) * size;
+  const slice = expiringData.slice(start, start + size);
+  const box = document.getElementById('expiringBody');
+  const wrap = document.getElementById('expiringPager');
+  if(total === 0){
+    box.innerHTML = '<div class="empty"><i class="bi bi-check-circle" style="font-size:28px"></i><div>暂无 30 天内到期合同</div></div>';
+    wrap.style.display = 'none';
+    return;
+  }
+  let rows = slice.map(c=>{
+    let daysCell, badge;
+    if(c.level==='red'){ daysCell = `<span class="level-red">已过期 ${c.days}天</span>`; badge = '<span class="badge-status badge-expired">已过期</span>'; }
+    else if(c.level==='yellow'){ daysCell = `<span class="level-yellow">仅剩 ${c.days}天</span>`; badge = '<span class="badge-status badge-priority-high">紧急</span>'; }
+    else { daysCell = `${c.days} 天`; badge = '<span class="badge-status badge-priority-mid">关注</span>'; }
+    return `<tr><td>${c.emp_name}</td><td>${c.department}</td><td>${c.contract_no}</td><td>${c.end_date}</td><td>${daysCell}</td><td>${badge}</td></tr>`;
+  }).join('');
+  box.innerHTML = `<div class="table-responsive"><table class="table"><thead><tr><th>员工</th><th>客户单位</th><th>档案编号</th><th>到期日</th><th>剩余天数</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  document.getElementById('expiringTotal').textContent = total;
+  renderPager('expiringPages', expiringPage, pages, (p)=>{ expiringPage=p; renderExpiring(); });
+  wrap.style.display = 'flex';
+}
+
+function renderBirthdays(){
+  const total = birthdayData.length;
+  const size = parseInt(document.getElementById('birthdaySize').value);
+  const pages = Math.max(1, Math.ceil(total / size));
+  if(birthdayPage > pages) birthdayPage = pages;
+  const start = (birthdayPage - 1) * size;
+  const slice = birthdayData.slice(start, start + size);
+  const box = document.getElementById('birthdayBody');
+  const wrap = document.getElementById('birthdayPager');
+  if(total === 0){
+    box.innerHTML = '<div class="empty"><i class="bi bi-cake2" style="font-size:28px"></i><div>本月暂无员工生日</div></div>';
+    wrap.style.display = 'none';
+    return;
+  }
+  let cards = slice.map(b=>{
+    let tip;
+    if(b.days === 0) tip = '<span class="level-red">🎉 今天生日</span>';
+    else if(b.days > 0) tip = `<span style="color:#db2777">还有 ${b.days} 天</span>`;
+    else tip = `<span style="color:#9ca3af">本月已过 ${-b.days} 天</span>`;
+    return `<div class="col-12 col-md-6">
+      <div class="d-flex align-items-center justify-content-between" style="border:1px solid #f3f4f6;border-radius:8px;padding:10px 12px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="width:36px;height:36px;border-radius:50%;background:#fce7f3;color:#db2777;display:flex;align-items:center;justify-content:center;font-weight:700">${b.name[0]}</div>
+          <div>
+            <div style="font-weight:600">${b.name}<span style="font-size:12px;color:#9ca3af;font-weight:400;margin-left:6px">${b.department}</span></div>
+            <div style="font-size:12px;color:#6b7280">${b.birthday.slice(5)} ${tip}</div>
+          </div>
+        </div>
+        <button class="btn btn-outline-secondary btn-sm" onclick="addBirthdayTodo('${b.id}','${encodeURIComponent(b.name)}','${b.birthday}')" title="添加生日提醒待办"><i class="bi bi-bell"></i></button>
+      </div></div>`;
+  }).join('');
+  box.innerHTML = `<div class="row g-2">${cards}</div>`;
+  document.getElementById('birthdayTotal').textContent = total;
+  renderPager('birthdayPages', birthdayPage, pages, (p)=>{ birthdayPage=p; renderBirthdays(); });
+  wrap.style.display = 'flex';
+}
+
+// 通用分页控件（数字按钮 + 上一页/下一页，含跳转）
+function renderPager(elId, page, pages, go){
+  const box = document.getElementById(elId);
+  let html = `<button class="btn btn-outline-secondary" ${page<=1?'disabled':''} data-go="${page-1}">上一页</button>`;
+  const nums = [];
+  const win = 2;
+  for(let i=1;i<=pages;i++){
+    if(i===1||i===pages||(i>=page-win&&i<=page+win)) nums.push(i);
+    else if(nums[nums.length-1]!=='...') nums.push('...');
+  }
+  nums.forEach(n=>{
+    if(n==='...') html += `<span class="btn btn-outline-secondary disabled">…</span>`;
+    else html += `<button class="btn ${n===page?'btn-primary':'btn-outline-secondary'}" data-go="${n}">${n}</button>`;
+  });
+  html += `<button class="btn btn-outline-secondary" ${page>=pages?'disabled':''} data-go="${page+1}">下一页</button>`;
+  html += `<input type="number" min="1" max="${pages}" value="${page}" class="form-control form-control-sm" style="width:64px">`;
+  html += `<button class="btn btn-outline-secondary" data-jump="1">跳转</button>`;
+  box.innerHTML = html;
+  box.querySelectorAll('[data-go]').forEach(btn=>{
+    btn.onclick = ()=>{ const p=parseInt(btn.dataset.go); if(p>=1&&p<=pages) go(p); };
+  });
+  box.querySelectorAll('[data-jump]').forEach(btn=>{
+    btn.onclick = ()=>{ const inp=box.querySelector('input[type=number]'); const p=parseInt(inp.value)||1; go(Math.min(Math.max(p,1),pages)); };
+  });
+}
+
+renderExpiring();
+renderBirthdays();
+
+// ================= 我的待办 - 月历 =================
+let calendarYear, calendarMonth, allTodos=[], selectedDate;
+
+function initCalendar(){
+  const today = new Date();
+  calendarYear = today.getFullYear();
+  calendarMonth = today.getMonth();
+  selectedDate = localDateStr(today);
+  loadCalendarTodos();
+}
+
+async function loadCalendarTodos(){
+  const data = await api('/api/todos?done=0');
+  if(data){ allTodos = data.items; renderCalendar(); }
+}
+
+function renderCalendar(){
+  const weekDays = ['日','一','二','三','四','五','六'];
+  const first = new Date(calendarYear, calendarMonth, 1);
+  const startWeek = first.getDay();
+  const daysInMonth = new Date(calendarYear, calendarMonth+1, 0).getDate();
+  const todayStr = localDateStr(new Date());
+  const monthStr = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}`;
+
+  // 截止日 -> 待办映射
+  const byDate = {};
+  allTodos.forEach(t=>{ if(!byDate[t.due_date]) byDate[t.due_date]=[]; byDate[t.due_date].push(t); });
+
+  let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <button class="btn btn-outline-secondary btn-sm" onclick="calNav(-1)"><i class="bi bi-chevron-left"></i></button>
+    <div style="font-weight:700;font-size:15px">${calendarYear}年${calendarMonth+1}月</div>
+    <button class="btn btn-outline-secondary btn-sm" onclick="calNav(1)"><i class="bi bi-chevron-right"></i></button>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);text-align:center;font-size:12px;color:#9ca3af;margin-bottom:4px">
+    ${weekDays.map(d=>`<div>${d}</div>`).join('')}
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">`;
+
+  // 月初空格
+  for(let i=0;i<startWeek;i++) html += `<div></div>`;
+
+  for(let day=1; day<=daysInMonth; day++){
+    const ds = `${calendarYear}-${String(calendarMonth+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const todos = byDate[ds]||[];
+    const isToday = ds===todayStr;
+    const isSelected = ds===selectedDate;
+    const prio = todos.map(t=>t.priority);
+    const high = prio.includes('高');
+    const mid = prio.includes('中');
+    const bg = isSelected ? 'background:#2c5aa0;color:#fff' :
+               isToday ? 'background:#eef2f7;border:2px solid #2c5aa0' : '';
+    const dotColor = high ? '#ef4444' : (mid ? '#f59e0b' : '#10b981');
+    html += `<div onclick="selectDay('${ds}')" title="${todos.map(t=>esc(t.title)).join('、')||''}"
+      style="${bg};padding:6px 0;text-align:center;border-radius:6px;cursor:pointer;position:relative;font-size:13px">
+      ${day}
+      ${todos.length?`<div style="position:absolute;bottom:3px;left:0;right:0;display:flex;justify-content:center;gap:2px">
+        ${todos.slice(0,3).map(t=>`<span style="width:6px;height:6px;border-radius:50%;background:${t.priority==='高'?'#ef4444':t.priority==='中'?'#f59e0b':'#10b981'}"></span>`).join('')}
+      </div>`:''}
+    </div>`;
+  }
+  html += `</div>`;
+  document.getElementById('todoCalendar').innerHTML = html;
+  renderDayTodos(byDate);
+}
+
+function calNav(d){
+  calendarMonth += d;
+  if(calendarMonth<0){ calendarMonth=11; calendarYear--; }
+  if(calendarMonth>11){ calendarMonth=0; calendarYear++; }
+  renderCalendar();
+}
+
+function selectDay(ds){
+  selectedDate = ds;
+  renderCalendar();
+}
+
+function renderDayTodos(byDate){
+  const todos = byDate[selectedDate]||[];
+  const box = document.getElementById('dayTodos');
+  const todayStr = localDateStr(new Date());
+  const overdue = selectedDate < todayStr;
+  let html = `<div style="border-top:1px solid #e5e7eb;padding-top:10px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-weight:600;color:${overdue?'#ef4444':'#374151'}">${selectedDate} ${overdue?'(已过期)':''} 待办 <span class="badge-status badge-priority-mid">${todos.length}项</span></div>
+      <button class="btn btn-outline-primary btn-sm" onclick="openTodoModal('${selectedDate}')"><i class="bi bi-plus-lg"></i> 添加</button>
+    </div>`;
+  if(todos.length===0){
+    html += `<div style="color:#9ca3af;text-align:center;padding:12px">当日暂无待办</div>`;
+  } else {
+    html += todos.map(t=>{
+      const prio = t.priority==='高'?'badge-priority-high':t.priority==='中'?'badge-priority-mid':'badge-priority-low';
+      const overdueCls = t.due_date<todayStr ? 'level-red' : '';
+      return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border:1px solid #f3f4f6;border-radius:6px;margin-bottom:6px">
+        <div style="flex:1"><div style="font-weight:500">${esc(t.title)}</div>
+          <div style="font-size:12px;color:#6b7280 ${overdueCls}">截止 ${t.due_date}${t.remind_start?` · 提醒 ${t.remind_start} ~ ${t.remind_end}`:''}${t.remind_count?` · ${t.reminded_count||0}/${t.remind_count}次`:''}</div></div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span class="badge-status ${prio}">${t.priority}</span>
+          <button class="btn btn-sm btn-outline-success" onclick="markDone(${t.id})" title="完成"><i class="bi bi-check-lg"></i></button>
+          <button class="btn btn-sm btn-outline-danger" onclick="delTodo(${t.id})" title="删除"><i class="bi bi-trash"></i></button>
+        </div>
+      </div>`;
+    }).join('');
+  }
+  html += `</div>`;
+  box.innerHTML = html;
+}
+
+function openTodoModal(ds){
+  document.getElementById('tmId').value='';
+  document.getElementById('tmTitle').value='';
+  document.getElementById('tmDue').value = ds || localDateStr(new Date());
+  const d = document.getElementById('tmDue').value;
+  document.getElementById('tmStart').value = d+'T09:00';
+  document.getElementById('tmEnd').value = d+'T18:00';
+  document.getElementById('tmCount').value='3';
+  document.getElementById('tmPriority').value='中';
+  new bootstrap.Modal(document.getElementById('todoModal')).show();
+}
+
+function saveTodo(){
+  confirmAction('确定保存该待办事项吗？', ()=>{ doSaveTodo(); });
+}
+async function doSaveTodo(){
+  const body = {
+    title: document.getElementById('tmTitle').value,
+    due_date: document.getElementById('tmDue').value,
+    remind_start: document.getElementById('tmStart').value,
+    remind_end: document.getElementById('tmEnd').value,
+    remind_count: parseInt(document.getElementById('tmCount').value) || 1,
+    priority: document.getElementById('tmPriority').value,
+  };
+  const r = await api('/api/todos', {method:'POST', body});
+  if(r){ showToast('待办已添加','success'); bootstrap.Modal.getInstance(document.getElementById('todoModal')).hide(); loadCalendarTodos(); }
+}
+
+async function markDone(id){
+  await api('/api/todos/'+id, {method:'PUT', body:{done:true}});
+  loadCalendarTodos();
+}
+
+function delTodo(id){
+  confirmAction('确认删除该待办事项吗？', async ()=>{ await doDelTodo(id); }, true);
+}
+async function doDelTodo(id){
+  await api('/api/todos/'+id, {method:'DELETE'});
+  loadCalendarTodos();
+}
+
+// 当月生日提醒 → 一键添加生日待办
+function addBirthdayTodo(id, name, birthday){
+  name = decodeURIComponent(name || '');
+  const y = new Date().getFullYear();
+  const md = birthday.slice(5);            // MM-DD
+  const due = `${y}-${md}`;
+  document.getElementById('tmId').value='';
+  document.getElementById('tmTitle').value=`🎂 ${name} 生日（${md}）`;
+  document.getElementById('tmDue').value = due;
+  document.getElementById('tmStart').value = due+'T09:00';
+  document.getElementById('tmEnd').value = due+'T18:00';
+  document.getElementById('tmCount').value='3';
+  document.getElementById('tmPriority').value='中';
+  new bootstrap.Modal(document.getElementById('todoModal')).show();
+}
+
+// 右下角待办提醒逻辑已统一移至 base.html（全站生效），本页仅保留日历
+initCalendar();
+</script>
+{% endblock %}

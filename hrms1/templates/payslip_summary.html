@@ -1,0 +1,1160 @@
+{% extends 'base.html' %}
+{% block page_title %}工资表汇总制作{% endblock %}
+{% block content %}
+<style>
+.ps-table{table-layout:auto;width:100%}
+.ps-table th,.ps-table td{border:1px solid #e5e7eb;padding:4px 8px;font-size:12px;white-space:nowrap;text-align:center}
+.ps-table td.num{text-align:right}
+.err-card{border:1px solid #fca5a5;background:#fef2f2;border-radius:8px;padding:12px 14px;margin-bottom:10px}
+.colset-label{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid #eef2f7;border-radius:6px;font-size:13px;cursor:pointer}
+</style>
+
+<div class="card">
+  <div class="card-body">
+    <h5 style="font-weight:700;margin-bottom:6px"><i class="bi bi-table"></i> 工资表汇总制作</h5>
+    <p class="text-muted" style="font-size:13px;margin-bottom:14px">
+      提供两种汇总方式：<b>① 导入校验修正</b>——导入现有工资表（支持含多个 sheet 的工作簿，按部门/分公司分表时可一次导入），系统自动识别序号列与金额列、逐表校验序号连续性与合计正确性，逐条提示并支持「系统自动修改 / 不变 / 自定义」三种处理，并可自定义添加表头表脚后<b>将各 sheet 分别成表、整体导出为一个多 sheet 工作簿</b>；
+      <b>② 模板生成</b>——基于已导入系统的工资明细，导入模板定义生成列（新模板导入后立即覆盖生效），可选关联指定月份五险一金数据或直接用导入数据，一键生成工资表并导出。
+    </p>
+
+    <ul class="nav nav-tabs mb-3" id="psTabs">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab1">① 导入校验修正</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab2">② 自定义生成</button></li>
+    </ul>
+
+    <div class="tab-content">
+      <!-- 方式一：导入校验修正 -->
+      <div class="tab-pane fade show active" id="tab1">
+        <div class="mb-3 d-flex gap-2 align-items-center flex-wrap">
+          <input type="file" id="psFile" class="form-control" style="max-width:340px" accept=".xlsx,.xls,.csv" onchange="srcFileDirty=true">
+          <button class="btn btn-primary btn-sm" onclick="checkFile()"><i class="bi bi-search"></i> 开始校验</button>
+        </div>
+        <div id="psSheetSel" class="mb-2 d-flex align-items-center flex-wrap" style="display:none"></div>
+        <div id="psDetect" class="text-muted mb-2" style="font-size:13px"></div>
+        <div id="psErrors"></div>
+
+        <!-- 个税计算模块 -->
+        <div class="card border mb-3" style="background:#fffaf0">
+          <div class="card-body py-3">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <b style="font-size:13px"><i class="bi bi-calculator"></i> 个税计算</b>
+              <span class="text-muted" style="font-size:12px">选择金额来源列与结果列，计算后写入表格并随导出新表输出</span>
+            </div>
+            <div class="row g-2 align-items-end">
+              <div class="col-auto">
+                <label class="modal-label mb-1">取值列（金额来源）</label>
+                <select id="taxSrc" class="form-select form-select-sm" style="width:auto"></select>
+              </div>
+              <div class="col-auto">
+                <label class="modal-label mb-1">填入列（结果）</label>
+                <select id="taxDst" class="form-select form-select-sm" style="width:auto"></select>
+              </div>
+              <div class="col-auto">
+                <label class="modal-label mb-1">算法</label>
+                <select id="taxMethod" class="form-select form-select-sm" style="width:auto">
+                  <option value="cum">累计预扣法（年度税率表）</option>
+                  <option value="month">按月扣缴（月度税率表）</option>
+                </select>
+              </div>
+              <div class="col-auto">
+                <label class="modal-label mb-1">起征点（基本减除费用）</label>
+                <input id="taxThreshold" type="number" class="form-control form-control-sm" style="width:110px" value="5000" min="0" step="500">
+              </div>
+              <div class="col" style="min-width:260px">
+                <label class="modal-label mb-1">扣除额列（社保/公积金等，可多选）</label>
+                <div id="taxDeductBox" class="border rounded p-2" style="max-height:104px; overflow:auto; background:#fff"></div>
+              </div>
+              <div class="col-auto">
+                <button class="btn btn-warning btn-sm" onclick="calcTax()"><i class="bi bi-calculator"></i> 计算个税</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div id="psPreview" class="table-responsive horiz-scroll mb-3" style="max-height:360px;overflow:auto"></div>
+
+        <!-- 表头表脚与字体设置：按用户需求自定义，支持单/多 sheet -->
+        <div class="card border mb-3" id="tab1HfCard" style="display:none">
+          <div class="card-body py-3">
+            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap">
+              <b style="font-size:13px"><i class="bi bi-layout-text-sidebar-reverse"></i> 表头表脚与字体设置</b>
+              <span class="text-muted" style="font-size:12px">逐工作表设置；无表头就填写新增，原表头不合用则按需求改写（点“导出生成新表格”时生效）</span>
+            </div>
+            <div id="tab1HfList"></div>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-end align-items-center gap-2 mt-2">
+          <span id="selTplBadge" class="badge text-bg-info" style="display:none"></span>
+          <button class="btn btn-outline-success btn-sm" onclick="genSalaryDetail()"><i class="bi bi-database-add"></i> 一键生成工资明细</button>
+          <button class="btn btn-success btn-sm" onclick="exportPayslip('after')"><i class="bi bi-file-earmark-excel"></i> 导出生成新表格</button>
+        </div>
+      </div>
+
+      <!-- 方式二：模板生成 -->
+      <div class="tab-pane fade" id="tab2">
+        <div class="mb-3">
+          <label class="modal-label">选择期间（留空则全部期间）</label>
+          <select id="genPeriod" class="form-select form-select-sm" style="width:auto"></select>
+        </div>
+
+        <!-- 生成模板（导入覆盖全局生效） -->
+        <div class="card border mb-3" style="background:#f8fafc">
+          <div class="card-body py-3">
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+              <b style="font-size:13px">生成模板：</b>
+              <input type="file" id="tplFile2" class="form-control form-control-sm" style="max-width:300px" accept=".xlsx,.xls,.csv">
+              <button class="btn btn-primary btn-sm" onclick="importGenTpl()"><i class="bi bi-upload"></i> 导入模板</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="downloadTplSampleGen()"><i class="bi bi-download"></i> 下载模板示例</button>
+            </div>
+            <div id="tplInfo2" class="text-muted" style="font-size:12px">加载模板中…</div>
+            <div id="tplCols2" class="d-flex flex-wrap gap-1 mt-2"></div>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="modal-label">社保数据关联</label>
+          <div class="d-flex gap-4 flex-wrap align-items-center">
+            <label class="colset-label"><input type="radio" name="insAssoc" value="1" onchange="onAssocChange()"> 关联五险一金数据（模板中的社保列取自指定月份五险一金模块）</label>
+            <label class="colset-label"><input type="radio" name="insAssoc" value="0" checked onchange="onAssocChange()"> 不关联，直接使用导入的工资数据</label>
+          </div>
+          <div id="insPeriodWrap" class="mt-2" style="display:none">
+            <label class="modal-label">选择关联月份（五险一金期间）</label>
+            <select id="insPeriod" class="form-select form-select-sm" style="width:auto"></select>
+            <span class="text-muted ms-2" style="font-size:12px">关联后，模板中的社保列取自该月五险一金数据。</span>
+          </div>
+          <div class="text-muted mt-1" style="font-size:12px">提示：模板中需包含社保列（如社保缴费基数、养老个人、公积金个人等）关联才会取值，模板示例已包含常用社保列。</div>
+        </div>
+        <div class="card border mb-3" style="background:#f8fafc">
+          <div class="card-body py-3">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+              <b style="font-size:13px"><i class="bi bi-grid-3x3"></i> 表头 / 表脚模板</b>
+              <input type="file" id="hfFile2" class="form-control form-control-sm" style="max-width:300px" accept=".xlsx,.xls,.csv">
+              <button class="btn btn-primary btn-sm" onclick="importHeadFoot()"><i class="bi bi-upload"></i> 导入模板</button>
+              <button class="btn btn-outline-secondary btn-sm" onclick="downloadHeadFootSample()"><i class="bi bi-download"></i> 下载模板示例</button>
+            </div>
+            <div id="hfInfo2" class="text-muted mt-2" style="font-size:12px">未导入模板，将使用下方文本表头/表脚。导入模板（含合并单元格）后优先使用模板，合并自动钳制到数据表宽度。</div>
+          </div>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-md-6">
+            <label class="modal-label">表头文本（未使用带样式模板时生效）</label>
+            <textarea id="genHeader" class="form-control" rows="3" placeholder="空港航食有限责任公司工资表&#10;期间：2026-08"></textarea>
+          </div>
+          <div class="col-md-6">
+            <label class="modal-label">表脚文本（未使用带样式模板时生效）</label>
+            <textarea id="genFooter" class="form-control" rows="3" placeholder="制表人：&#10;审核人："></textarea>
+          </div>
+        </div>
+        <div class="mb-3">
+          <button class="btn btn-outline-primary btn-sm" onclick="genPreview()"><i class="bi bi-eye"></i> 预览</button>
+          <button class="btn btn-success btn-sm" onclick="genExport()"><i class="bi bi-file-earmark-excel"></i> 生成并导出</button>
+        </div>
+        <div id="genPreview" class="table-responsive horiz-scroll" style="max-height:360px;overflow:auto"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let origSheets = [], curSheet = 0, sheetCorrections = [], lastErrors = [], corrections = {}, srcToken = '', srcFile = null, srcFileDirty = false;
+let genGrid = null;
+let selectedTemplate = null;   // {type:'saved', id, name, columns, has_file, headfoot, tax} | {type:'oneshot', name, columns, file, headfoot} | null
+let pendingTpl = null;         // 一次性导入的待选模板 {name, columns, fileEl, headfoot, hfEdited}
+let tplLibraryItems = [];
+let headFootTpl = null;  // 表头/表脚模板（含合并单元格，方式二使用）
+let editTplCtx = null;   // 模板配置编辑器上下文 {mode:'pending'|'saved', id, name, sheetNames}
+
+// ===== 个税税率表与计算 =====
+const TAX_CUM = [[36000,0.03,0],[144000,0.10,2520],[300000,0.20,16920],[420000,0.25,31920],[660000,0.30,52920],[960000,0.35,85920],[Infinity,0.45,181920]];
+const TAX_MONTH = [[1500,0.03,0],[4500,0.10,105],[9000,0.20,555],[35000,0.25,1005],[55000,0.30,2755],[80000,0.35,5505],[Infinity,0.45,13505]];
+function calcIncomeTax(amount, method, threshold){
+  const table = (method === 'cum') ? TAX_CUM : TAX_MONTH;
+  // 应纳税所得额 = max(0, 金额 - 起征点)；仅当起征点为 空/未填 时默认 5000。
+  // 注意：显式填写 0 即表示“不扣起征点”，不能回退成 5000（否则设 0 无效）。
+  const th = (threshold === undefined || threshold === null || threshold === '') ? 5000 : (parseFloat(threshold) || 0);
+  const x = Math.max(0, (parseFloat(amount) || 0) - th);
+  for(const [cap, rate, ded] of table){
+    if(x <= cap) return Math.max(0, +(x*rate - ded).toFixed(2));
+  }
+  return 0;
+}
+function parseMoney(s){
+  if(s === null || s === undefined) return null;
+  const t = String(s).replace(/,/g, '').trim();
+  if(t === '') return null;
+  const n = parseFloat(t);
+  return isNaN(n) ? null : n;
+}
+function fillTaxSelects(grid){
+  const src = document.getElementById('taxSrc');
+  const dst = document.getElementById('taxDst');
+  const dbox = document.getElementById('taxDeductBox');
+  if(!grid || !grid.length){ return; }
+  const head = grid[0];
+  const opts = head.map((h,i)=>`<option value="${i}">${escapeHtml(h||('第'+(i+1)+'列'))}</option>`).join('');
+  src.innerHTML = opts; dst.innerHTML = opts;
+  // 扣除额列渲染为复选框（支持多选），默认不勾选，由用户手动选择正确列，避免自动选错/重复扣减
+  if(dbox){
+    dbox.innerHTML = head.map((h,i)=>
+      `<div class="form-check form-check-inline mb-1"><input class="form-check-input tax-deduct-cb" type="checkbox" value="${i}" id="ded_${i}">`+
+      `<label class="form-check-label" for="ded_${i}" style="font-size:12px">${escapeHtml(h||('第'+(i+1)+'列'))}</label></div>`
+    ).join('');
+  }
+  // 默认：取值列取“应发工资/税前”，填入列取“个税”
+  const guessSrc = head.findIndex(h=>/应发|税前|应纳税所得额|收入/.test(h||''));
+  const guessDst = head.findIndex(h=>/个税/.test(h||''));
+  if(guessSrc >= 0) src.value = guessSrc;
+  if(guessDst >= 0) dst.value = guessDst;
+}
+function calcTax(){
+  const sh = origSheets[curSheet];
+  if(!sh || !sh.grid || sh.grid.length < 2){ showToast('请先上传并校验','error'); return; }
+  const grid = sh.grid;
+  const sc = parseInt(document.getElementById('taxSrc').value);
+  const dc = parseInt(document.getElementById('taxDst').value);
+  const method = document.getElementById('taxMethod').value;
+  const threshold = document.getElementById('taxThreshold').value;
+  // 读取所有勾选的扣除额列（复选框，支持多选）
+  const deductIdx = Array.from(document.querySelectorAll('#taxDeductBox .tax-deduct-cb:checked')).map(cb=>parseInt(cb.value));
+  if(sc === dc){ showToast('取值列与填入列不能相同','error'); return; }
+  // 仅当起征点为 空/未填 时默认 5000；显式填 0 表示不扣起征点
+  const th = (threshold === undefined || threshold === null || threshold === '') ? 5000 : (parseFloat(threshold) || 0);
+  let n = 0;
+  for(let i=1;i<grid.length;i++){
+    const v = parseMoney(grid[i][sc]);
+    if(v === null) continue;
+    let dedSum = 0;
+    for(const di of deductIdx){ const dv = parseMoney(grid[i][di]); if(dv) dedSum += dv; }
+    const base = v - dedSum;  // 先减专项扣除（社保个人/公积金个人等，勾选了才减）
+    grid[i][dc] = String(calcIncomeTax(base, method, th));  // 再减起征点
+    n++;
+  }
+  renderPreview();
+  const dedLabel = deductIdx.length ? (' 扣除额(' + deductIdx.length + '列)') : '';
+  showToast('已计算 ' + n + ' 行个税（' + (method==='cum'?'累计预扣法':'按月扣缴') + '，已减' + dedLabel + ' 起征点 ' + th + '）', 'success');
+}
+
+// ===== 表头/表脚模板（含合并单元格，方式二：自定义生成使用） =====
+function fillHfTextareasFromTpl(){
+  if(!headFootTpl) return;
+  const h = (headFootTpl.header && headFootTpl.header.grid) ? headFootTpl.header.grid : [];
+  const f = (headFootTpl.footer && headFootTpl.footer.grid) ? headFootTpl.footer.grid : [];
+  const g = el => (el && el.length ? el[0] : '');
+  const ph = document.getElementById('genHeader'); if(ph) ph.value = h.map(g).join('\n');
+  const pf = document.getElementById('genFooter'); if(pf) pf.value = f.map(g).join('\n');
+}
+async function loadHeadFoot(){
+  const d = await api('/api/payslip/headfoot');
+  if(d && (d.header && d.header.grid && d.header.grid.length)){
+    headFootTpl = d;
+    const nh = d.header.grid.length, nf = (d.footer && d.footer.grid ? d.footer.grid.length : 0);
+    const msg = '已加载表头表脚模板（表头 ' + nh + ' 行 / 表脚 ' + nf + ' 行，含合并单元格），导出优先使用。';
+    const hf2 = document.getElementById('hfInfo2'); if(hf2) hf2.textContent = msg;
+    fillHfTextareasFromTpl();
+  } else {
+    headFootTpl = null;
+  }
+}
+async function importHeadFoot(){
+  const file = document.getElementById('hfFile2').files[0];
+  if(!file){ showToast('请选择模板文件','error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/payslip/headfoot/import', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+  headFootTpl = data;
+  fillHfTextareasFromTpl();
+  const nh = (data.header && data.header.grid ? data.header.grid.length : 0);
+  const nf = (data.footer && data.footer.grid ? data.footer.grid.length : 0);
+  const msg = '已加载表头表脚模板（表头 ' + nh + ' 行 / 表脚 ' + nf + ' 行，含合并单元格），导出优先使用。';
+  const hf2 = document.getElementById('hfInfo2'); if(hf2) hf2.textContent = msg;
+  showToast('表头表脚模板已导入并生效','success');
+}
+async function downloadHeadFootSample(){
+  const r = await fetch('/api/payslip/headfoot/sample');
+  if(!r.ok){ showToast('下载失败','error'); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '工资表表头表脚模板.xlsx';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+function escapeHtml(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ===== 方式一：导入校验修正（支持多 sheet） =====
+async function checkFile(){
+  const file = document.getElementById('psFile').files[0];
+  if(!file){ showToast('请选择文件','error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  showToast('正在解析与校验…');
+  const r = await fetch('/api/payslip/check', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'校验失败','error'); return; }
+  origSheets = data.sheets || [];
+  srcToken = data.src_token || '';
+  srcFile = file;   // 保留源文件，导出时随请求提交（样式复用不依赖 token 缓存）
+  srcFileDirty = false;   // 已按当前文件完成校验
+  curSheet = 0;
+  sheetCorrections = origSheets.map(()=>({}));
+  renderSheetSelector();
+  renderCurrentSheet();
+  renderTab1Hf();
+  const totalErr = origSheets.reduce((s,sh)=>s+sh.errors.length,0);
+  const msg = '校验完成：共 ' + origSheets.length + ' 张表' +
+    (origSheets.length>1 ? '（多 sheet 将逐表校验、整体导出为一个工作簿）' : '') +
+    (totalErr ? ('，发现 '+totalErr+' 处异常') : '，未发现异常');
+  showToast(msg, totalErr?'error':'success');
+}
+
+function renderSheetSelector(){
+  const box = document.getElementById('psSheetSel');
+  if(!origSheets.length){ box.style.display='none'; box.innerHTML=''; return; }
+  box.style.display='';
+  if(origSheets.length === 1){
+    box.innerHTML = '<span class="text-muted" style="font-size:13px">工作表：<b>'+escapeHtml(origSheets[0].name)+'</b></span>';
+    return;
+  }
+  box.innerHTML = '<label class="modal-label mb-0 me-2">当前工作表</label>' +
+    '<select id="psSheet" class="form-select form-select-sm" style="width:auto" onchange="switchSheet(this.value)">' +
+    origSheets.map((sh,i)=>`<option value="${i}">${escapeHtml(sh.name)}（${sh.errors.length} 处异常）</option>`).join('') +
+    '</select>';
+}
+
+function switchSheet(v){
+  curSheet = parseInt(v);
+  renderCurrentSheet();
+}
+
+// 表头表脚与字体设置（逐工作表）：无表头可填空新增，原表头不合用则改写
+// 工作表名称 → 表头表脚默认值映射（未匹配使用中性回退）
+function getSheetDefaults(nm){
+  const map = {
+    '明细': { h1:{layout:'merge',align:'center',font:'宋体',size:22,bold:true},  h2:{layout:'cols',align:'left',font:'宋体',size:16}, f:{layout:'cols',align:'center',font:'宋体',size:9} },
+    '分摊': { h1:{layout:'merge',align:'center',font:'宋体',size:16,bold:true},  h2:{layout:'cols',align:'left',font:'宋体',size:14}, f:{layout:'cols',align:'center',font:'宋体',size:11} },
+    '异动': { h1:{layout:'merge',align:'center',font:'宋体',size:14,bold:true},  h2:{layout:'cols',align:'left',font:'宋体',size:11}, f:{layout:'cols',align:'center',font:'宋体',size:11} },
+    '离职': { h1:{layout:'merge',align:'center',font:'宋体',size:11,bold:true},  h2:{layout:'cols',align:'left',font:'宋体',size:11}, f:{layout:'cols',align:'center',font:'宋体',size:11} }
+  };
+  for(const key in map){ if(nm.indexOf(key) >= 0) return map[key]; }
+  return { h1:{layout:'merge',align:'center',font:'宋体',size:16,bold:true}, h2:{layout:'cols',align:'left',font:'宋体',size:12}, f:{layout:'cols',align:'center',font:'宋体',size:11} };
+}
+
+const __sheetNameByIdMap = {};
+
+function optGrp(vals, labels, sel){
+  return vals.map((v,i)=>'<option value="'+v+'"'+(v===sel?' selected':'')+'>'+labels[i]+'</option>').join('');
+}
+
+function renderTab1Hf(){
+  const box = document.getElementById('tab1HfList');
+  const card = document.getElementById('tab1HfCard');
+  if(!origSheets.length){ card.style.display='none'; box.innerHTML=''; return; }
+  card.style.display = '';
+  let html = '';
+  origSheets.forEach(sh=>{
+    const nm = sh.name;
+    const idn = cssId(nm);
+    __sheetNameByIdMap[idn] = nm;
+    const def = getSheetDefaults(nm);
+    html += '<div class="border rounded p-2 my-2" style="background:#fbfdff">';
+    html += '<div class="fw-semibold mb-2" style="font-size:12px">工作表：'+escapeHtml(nm)+'</div>';
+    html += '<div class="row g-3">';
+    // 左栏：表头（单行文本框 + 逐行动态样式，默认显示第1行，输入第2/3行时展开）
+    html += '<div class="col-md-7">';
+    html += '<div class="mb-1"><label class="modal-label mb-1 d-block" style="font-size:12px">表头（每行一条；逐列定位时同一行内可用「列字母:文本」指定列，如「A:负责人： O:制表人：」）</label>';
+    html += '<textarea id="hfH_'+idn+'" rows="3" class="form-control form-control-sm" style="font-size:12px" placeholder="第1行&#10;第2行" oninput="onHeaderInput(\''+idn+'\')"></textarea></div>';
+    html += '<div id="hfRowFont_'+idn+'"></div>';
+    html += '</div>';
+    // 右栏：表脚（默认值按工作表匹配）
+    html += '<div class="col-md-5">';
+    html += '<div class="mb-1"><label class="modal-label mb-1 d-block" style="font-size:12px">表脚（每行一条，多列用 Tab 分隔）</label>';
+    html += '<textarea id="hfF_'+idn+'" rows="2" class="form-control form-control-sm" style="font-size:12px" placeholder="如：A:负责人： O:制表人："></textarea></div>';
+    html += '<div class="d-flex flex-wrap align-items-center gap-2" style="font-size:12px">';
+    html += '<span>表脚布局 <select id="hfFL_'+idn+'" class="form-select form-select-sm d-inline-block" style="width:auto" onchange="onFootLayoutChange(\''+idn+'\')">'+optGrp(['cols','merge'],['逐列定位','合并居中'], def.f.layout)+'</select></span>';
+    html += '<span>表脚对齐 <select id="hfFA_'+idn+'" class="form-select form-select-sm d-inline-block" style="width:auto">'+optGrp(['center','left','right'],['居中','左对齐','右对齐'], def.f.align)+'</select></span>';
+    html += '<span>表脚字体 <select id="hfFont_'+idn+'" class="form-select form-select-sm d-inline-block" style="width:auto">'+hfFontOpts(def.f.font)+'</select></span>';
+    html += '<span>表脚字号 <input id="hfSize_'+idn+'" type="number" class="form-control form-control-sm d-inline-block" style="width:64px" value="'+def.f.size+'" min="8" max="36"></span>';
+    html += '<span><label class="form-check mb-0 ms-1"><input id="hfBold_'+idn+'" type="checkbox" class="form-check-input"> 加粗</label></span>';
+    html += '</div>';
+    html += '<div class="text-muted mt-1" id="hfFN_'+idn+'" style="font-size:12px">逐列定位：每一行，同一行内用「列字母:文本」指定列（空格分隔多段也分别落位），如「A:负责人： O:制表人：」。</div>';
+    html += '</div>';
+    html += '</div>';
+    html += '</div>';
+  });
+  box.innerHTML = html;
+  // 初始渲染各表头的逐行样式（至少显示第1行，带默认值）
+  origSheets.forEach(sh=>{ onHeaderInput(cssId(sh.name)); });
+}
+
+// 表头文本框变更：动态渲染逐行「布局/对齐/字体/字号/加粗」控件（每行一条，上下堆叠；至少显示第1行；保留已设值）
+function onHeaderInput(idn){
+  const box = document.getElementById('hfRowFont_'+idn);
+  const hEl = document.getElementById('hfH_'+idn);
+  if(!box || !hEl) return;
+  const nm = __sheetNameByIdMap[idn] || '';
+  const def = getSheetDefaults(nm);
+  const lines = parseTxtRows(hEl.value);
+  const rows = Math.max(lines.length, 1); // 空文本也至少显示第1行
+  const gv = (elid)=>{ const e = document.getElementById(elid); return e ? e.value : null; };
+  let html = '';
+  for(let i=0;i<rows;i++){
+    const k = idn + '_' + i;
+    const rowDef = (i===0) ? def.h1 : def.h2;
+    const curL = gv('hfHL_'+k) || rowDef.layout;
+    const curA = gv('hfHA_'+k) || rowDef.align;
+    const curFont = gv('hfHFfont_'+k) || rowDef.font;
+    const curSize = gv('hfHFsize_'+k) || rowDef.size;
+    const bEl = document.getElementById('hfHFbold_'+k);
+    const curBold = (bEl ? bEl.checked : rowDef.bold);
+    html += '<div class="border rounded p-1 mb-1" style="font-size:12px">';
+    html += '表头第'+(i+1)+'行：';
+    html += ' 布局 <select id="hfHL_'+k+'" class="form-select form-select-sm d-inline-block" style="width:auto">'+optGrp(['merge','cols'],['合并居中','逐列定位'], curL)+'</select>';
+    html += ' 对齐 <select id="hfHA_'+k+'" class="form-select form-select-sm d-inline-block" style="width:auto">'+optGrp(['center','left','right'],['居中','左对齐','右对齐'], curA)+'</select>';
+    html += ' 字体 <select id="hfHFfont_'+k+'" class="form-select form-select-sm d-inline-block" style="width:auto">'+hfFontOpts(curFont)+'</select>';
+    html += ' 字号 <input id="hfHFsize_'+k+'" type="number" class="form-control form-control-sm d-inline-block" style="width:64px" value="'+curSize+'" min="8" max="36">';
+    html += ' <label class="ms-1"><input id="hfHFbold_'+k+'" type="checkbox" class="form-check-input"'+(curBold?' checked':'')+'> 加粗</label>';
+    html += '</div>';
+  }
+  box.innerHTML = html;
+}
+
+function hfFontOpts(sel){
+  const arr = ['宋体','黑体','微软雅黑','仿宋','等线','Arial'];
+  return arr.map(f => '<option value="'+f+'"'+(f===sel?' selected':'')+'>'+f+'</option>').join('');
+}
+
+function onFootLayoutChange(idn){
+  const sel = document.getElementById('hfFL_'+idn);
+  const note = document.getElementById('hfFN_'+idn);
+  if(!sel || !note) return;
+  if(sel.value === 'merge'){
+    note.innerHTML = '合并居中：本行所有内容合并为一个单元格并居中，多段用空格连接，如「负责人： 制表人：」。';
+  } else {
+    note.innerHTML = '逐列定位：每一行，同一行内用「列字母:文本」指定列（空格分隔多段也分别落位），如「A:负责人： O:制表人：」。';
+  }
+}
+
+// 读取用户在页面设置的表头表脚与字体，组装成 v2 配置（仅含非空文本的表）
+function collectTab1Hf(){
+  const per = {};
+  let any = false;
+  origSheets.forEach(sh=>{
+    const nm = sh.name, idn = cssId(nm);
+    const fEl = document.getElementById('hfF_'+idn);
+    const fTxt = fEl ? parseTxtRows(fEl.value) : [];
+    const hEl = document.getElementById('hfH_'+idn);
+    const hTxt = hEl ? parseTxtRows(hEl.value) : [];
+    const header_fonts = [];
+    const header_layouts = [];
+    const header_aligns = [];
+    hTxt.forEach((ln, i)=>{
+      const k = idn + '_' + i;
+      const lEl = document.getElementById('hfHL_'+k);
+      const aEl = document.getElementById('hfHA_'+k);
+      const fEl2 = document.getElementById('hfHFfont_'+k);
+      const sEl = document.getElementById('hfHFsize_'+k);
+      const bEl = document.getElementById('hfHFbold_'+k);
+      header_layouts.push(lEl ? lEl.value : 'merge');
+      header_aligns.push(aEl ? aEl.value : 'center');
+      header_fonts.push({
+        name: (fEl2 ? fEl2.value : '宋体'),
+        size: (sEl ? parseInt(sEl.value) : 11) || 11,
+        bold: bEl ? bEl.checked : false
+      });
+    });
+    if(!hTxt.length && !fTxt.length) return;  // 该表未设置表头表脚则不纳入
+    const font = {
+      name: (document.getElementById('hfFont_'+idn).value || '宋体'),
+      size: parseInt(document.getElementById('hfSize_'+idn).value) || 11,
+      bold: document.getElementById('hfBold_'+idn).checked
+    };
+    per[nm] = {
+      header_after: hTxt,
+      footer_after: fTxt,
+      font: font,
+      header_fonts: header_fonts,
+      header_layouts: header_layouts,
+      header_aligns: header_aligns,
+      footer_align: document.getElementById('hfFA_'+idn).value,
+      footer_layout: document.getElementById('hfFL_'+idn).value
+    };
+    any = true;
+  });
+  return any ? {per_sheet: per} : null;
+}
+
+function renderCurrentSheet(){
+  const sh = origSheets[curSheet];
+  if(!sh) return;
+  lastErrors = sh.errors;
+  corrections = sheetCorrections[curSheet];
+  renderDetect(sh.detect);
+  renderErrors(sh.errors);
+  renderPreview();
+  fillTaxSelects(sh.grid);
+}
+
+function renderDetect(det){
+  const el = document.getElementById('psDetect');
+  if(!det){ el.textContent=''; return; }
+  const seq = det.seq_col!=null ? ('第'+(det.seq_col+1)+'列') : '未识别';
+  const amt = det.amount_cols.length ? det.amount_cols.map(c=>'第'+(c+1)+'列').join('、') : '未识别';
+  const tot = det.total_row!=null ? ('第'+(det.total_row+1)+'行') : '未识别（将不校验合计）';
+  el.innerHTML = `识别结果：序号列=<b>${seq}</b>；金额列=<b>${amt}</b>；合计行=<b>${tot}</b>。若识别有误，可在导出的表格中手动调整。`;
+}
+
+function renderErrors(errors){
+  const box = document.getElementById('psErrors');
+  if(!errors || !errors.length){
+    box.innerHTML = '<div class="alert alert-success" style="font-size:13px">校验通过，未发现问题。</div>';
+    return;
+  }
+  lastErrors = errors;
+  let html = '<div class="alert alert-warning" style="font-size:13px">发现 '+errors.length+' 处异常，请逐条选择处理方式：</div>';
+  errors.forEach((e,i)=>{ html += errCard(e,i); });
+  box.innerHTML = html;
+}
+
+function errCard(e,i){
+  const c = corrections[i] || {choice:'auto'};
+  const chk = v => (c.choice===v ? 'checked' : '');
+  const cusVal = c.choice==='custom' ? (c.custom||'') : '';
+  return `<div class="err-card">
+    <div style="font-weight:600;margin-bottom:6px">[${e.label}] ${e.msg}</div>
+    <div style="font-size:12px" class="mb-2">原值：<b>${escapeHtml(e.wrong)}</b> ｜ 正确值：<b class="text-danger">${escapeHtml(e.correct)}</b></div>
+    <div class="d-flex gap-3 flex-wrap align-items-center">
+      <label><input type="radio" name="err${i}" value="auto" ${chk('auto')} onchange="setChoice(${i},'auto')"> 系统自动修改</label>
+      <label><input type="radio" name="err${i}" value="keep" ${chk('keep')} onchange="setChoice(${i},'keep')"> 不变</label>
+      <label class="d-flex align-items-center gap-1"><input type="radio" name="err${i}" value="custom" ${chk('custom')} onchange="setChoice(${i},'custom')"> 自定义</label>
+      <input type="text" class="form-control form-control-sm" style="width:170px" placeholder="输入正确值" id="cus${i}" value="${escapeHtml(cusVal)}" oninput="setCustom(${i},this.value)">
+    </div></div>`;
+}
+
+function setChoice(i, choice){ corrections[i] = corrections[i] || {}; corrections[i].choice = choice; }
+function setCustom(i, v){
+  corrections[i] = corrections[i] || {};
+  corrections[i].choice = 'custom';
+  corrections[i].custom = v;
+  const rb = document.querySelector('input[name="err'+i+'"][value="custom"]');
+  if(rb) rb.checked = true;
+}
+
+function renderPreview(){
+  const box = document.getElementById('psPreview');
+  const sh = origSheets[curSheet];
+  if(!sh || !sh.grid || !sh.grid.length){ box.innerHTML=''; return; }
+  const grid = sh.grid;
+  const show = grid.slice(0, 50);
+  let html = '<table class="table table-sm table-bordered ps-table"><tbody>';
+  show.forEach(r=>{
+    html += '<tr>' + r.map(c=>`<td>${c===''?'&nbsp;':escapeHtml(c)}</td>`).join('') + '</tr>';
+  });
+  html += '</tbody></table>';
+  if(grid.length > 50) html += '<div class="text-muted" style="font-size:12px">仅预览前 50 行，导出为全部 '+grid.length+' 行</div>';
+  box.innerHTML = html;
+}
+
+function applyCorrections(g){
+  for(let i=0; i<lastErrors.length; i++){
+    const e = lastErrors[i];
+    const c = corrections[i] || {choice:'auto'};
+    if(c.choice === 'keep') continue;
+    if(e.type === 'seq'){
+      const sc = e.col;
+      if(c.choice === 'auto'){
+        let idx = 1;
+        for(let r=0; r<g.length; r++){
+          const f = parseFloat(g[r][sc]);
+          if(Number.isInteger(f)){ g[r][sc] = String(idx++); }
+        }
+      } else if(c.choice === 'custom' && c.custom){
+        const arr = c.custom.split(/[,\s]+/).filter(Boolean);
+        let ai = 0;
+        for(let r=0; r<g.length; r++){
+          const f = parseFloat(g[r][sc]);
+          if(Number.isInteger(f) && ai < arr.length){ g[r][sc] = arr[ai++]; }
+        }
+      }
+    } else if(e.type === 'sum'){
+      const j = e.col, rr = e.row;
+      if(c.choice === 'auto') g[rr][j] = e.correct;
+      else if(c.choice === 'custom' && c.custom !== '') g[rr][j] = c.custom;
+    }
+  }
+  return g;
+}
+
+// 一键生成工资明细：把当前校验修正后的工资表正文区写入工资明细（个税管理等随即有数据）
+async function genSalaryDetail(){
+  if(!origSheets.length){ showToast('请先上传并校验','error'); return; }
+  if(srcFileDirty){ showToast('检测到已更换文件，请先点击「开始校验」再操作','error'); return; }
+  const period = prompt('请输入工资明细期间（格式 YYYY-MM，如 2026-08）：', new Date().toISOString().slice(0,7));
+  if(period === null) return;
+  const p = period.trim();
+  if(!/^\d{4}-\d{1,2}$/.test(p)){ showToast('期间格式不正确，应为 YYYY-MM','error'); return; }
+  const sheets = origSheets.map((sh,i)=>{
+    lastErrors = sh.errors;
+    corrections = sheetCorrections[i];
+    const g = applyCorrections(JSON.parse(JSON.stringify(sh.grid)));
+    return {name: sh.name, grid: g};
+  });
+  // 随请求提交「表头表脚与字体」配置（优先本页内联，其次模板库），用于提取客户单位（单位名称）
+  const inlineHf = collectTab1Hf();
+  const payload = {sheets, period: p};
+  if(inlineHf){
+    payload.headfoot = inlineHf;
+  } else if(selectedTemplate && selectedTemplate.type==='saved'){
+    try { payload.template_id = selectedTemplate.id; } catch(e){}
+  } else if(selectedTemplate && selectedTemplate.type==='oneshot' && selectedTemplate.headfoot){
+    payload.headfoot = selectedTemplate.headfoot;
+  }
+  showToast('正在生成工资明细…');
+  const r = await fetch('/api/payslip/to-salary', {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload)});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'生成失败','error'); return; }
+  const extra = (data.unmatched && data.unmatched.length)
+    ? `，未匹配员工 ${data.unmatched.length} 条` : '';
+  showToast(`已生成工资明细：新增 ${data.success} 条，更新 ${data.updated} 条${extra}`,
+    (data.unmatched && data.unmatched.length) ? 'error' : 'success');
+}
+
+async function exportPayslip(variant){
+  if(!origSheets.length){ showToast('请先上传并校验','error'); return; }
+  if(srcFileDirty){ showToast('检测到已更换文件，请先点击「开始校验」再导出','error'); return; }
+  const sheets = origSheets.map((sh,i)=>{
+    // 复用全局 corrections/lastErrors 逻辑逐表应用修正
+    lastErrors = sh.errors;
+    corrections = sheetCorrections[i];
+    const g = applyCorrections(JSON.parse(JSON.stringify(sh.grid)));
+    return {name: sh.name, grid: g};
+  });
+  const fd = new FormData();
+  fd.append('sheets', JSON.stringify(sheets));
+  fd.append('variant', variant);
+  fd.append('filename', '工资表(校验后).xlsx');
+  if(srcToken) fd.append('src_token', srcToken);
+  if(srcFile) fd.append('src_file', srcFile);   // 源文件随导出一起提交，确保行高/列宽/字体/换行样式可复用
+  // 优先使用本页「表头表脚与字体」内联配置（按用户需求自定义，覆盖模板库）
+  const inlineHf = collectTab1Hf();
+  if(inlineHf){
+    fd.append('headfoot', JSON.stringify(inlineHf));
+  } else if(selectedTemplate && selectedTemplate.type==='saved'){
+    fd.append('template_id', selectedTemplate.id);
+  } else if(selectedTemplate && selectedTemplate.type==='oneshot' && selectedTemplate.file){
+    fd.append('file', selectedTemplate.file);
+    if(variant === 'after' && selectedTemplate.headfoot){
+      // 一次性模板：把按 sheet 表头表脚 + 个税配置一并传给导出端点
+      fd.append('headfoot', JSON.stringify(selectedTemplate.headfoot));
+    }
+  }
+  await postDownloadForm('/api/payslip/export', fd);
+}
+
+// ===== 方式二：模板导入（覆盖全局生效）+ 社保关联 + 生成 =====
+async function loadGenMeta(){
+  await loadGenTplColumns();
+  const p = await api('/api/salary/periods');
+  if(p){
+    const sel = document.getElementById('genPeriod');
+    sel.innerHTML = '<option value="">全部期间</option>' + p.items.map(x=>`<option value="${x}">${x}</option>`).join('');
+  }
+  await loadInsPeriods();
+}
+
+async function loadGenTplColumns(){
+  const d = await api('/api/payslip/template');
+  if(d) renderGenTpl(d.columns);
+}
+
+async function importGenTpl(){
+  const file = document.getElementById('tplFile2').files[0];
+  if(!file){ showToast('请选择模板文件','error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/payslip/template/import', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+  renderGenTpl(data.columns);
+  if(data.unknown && data.unknown.length) showToast('模板已覆盖生效，未识别列：'+data.unknown.join('、'), 'error');
+  else showToast('模板已导入并覆盖生效','success');
+}
+
+function downloadTplSampleGen(){
+  return downloadTplSample();
+}
+
+function renderGenTpl(tpl){
+  const info = document.getElementById('tplInfo2');
+  const box = document.getElementById('tplCols2');
+  if(!tpl || !tpl.length){
+    info.textContent = '当前模板：未导入，使用默认列（全部工资明细列）';
+    box.innerHTML = '';
+    return;
+  }
+  const nS = tpl.filter(c=>c.kind==='salary').length;
+  const nI = tpl.filter(c=>c.kind==='insurance').length;
+  const nL = tpl.filter(c=>c.kind==='lit').length;
+  info.innerHTML = '当前生效模板：共 <b>'+tpl.length+'</b> 列（工资列 '+nS+' / 社保列 '+nI+(nL?(' / 其他 '+nL):'')+'）。新模板导入后立即覆盖生效。';
+  box.innerHTML = tpl.map(c=>{
+    const cls = c.kind==='insurance' ? 'badge text-bg-primary'
+      : c.kind==='seq' ? 'badge text-bg-secondary'
+      : c.kind==='lit' ? 'badge text-bg-warning' : 'badge text-bg-light border';
+    return `<span class="${cls}" style="font-weight:500">${escapeHtml(c.label)}</span>`;
+  }).join('');
+}
+
+async function loadInsPeriods(){
+  const p = await api('/api/insurance/periods');
+  const sel = document.getElementById('insPeriod');
+  if(p && p.items && p.items.length){
+    sel.innerHTML = p.items.map(x=>`<option value="${x}">${x}</option>`).join('');
+  } else {
+    sel.innerHTML = '<option value="">（无可用期间）</option>';
+  }
+}
+
+async function loadTplLibrary(){
+  const d = await api('/api/payslip/templates');
+  tplLibraryItems = (d && d.items) || [];
+  renderTplLibrary();
+}
+
+function renderTplLibrary(){
+  const box = document.getElementById('tplLibrary');
+  if(!box) return;  // 模板库卡片已移除
+  if(!tplLibraryItems.length){
+    box.innerHTML = '<div class="text-muted" style="font-size:12px">暂无固定模板，导入模板后可“存为固定模板”长期保存。</div>';
+    return;
+  }
+  box.innerHTML = tplLibraryItems.map(t=>{
+    const styleBadge = t.has_file ? '<span class="badge text-bg-success" style="font-weight:500">含样式</span>'
+                                    : '<span class="badge text-bg-light border" style="font-weight:500">纯列</span>';
+    const hfBadge = t.has_headfoot ? '<span class="badge text-bg-info" style="font-weight:500">含表头表脚</span>' : '';
+    const active = selectedTemplate && selectedTemplate.type==='saved' && selectedTemplate.id===t.id
+      ? 'border-primary bg-primary bg-opacity-10' : '';
+    return `<div class="d-flex justify-content-between align-items-center border rounded p-2 mb-2 ${active}" data-tid="${t.id}">
+      <div>
+        <b style="font-size:13px">${escapeHtml(t.name)}</b> ${styleBadge} ${hfBadge}
+        <span class="text-muted ms-2" style="font-size:12px">更新 ${t.updated_at||''} ｜ ${t.columns.length} 列</span>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <button class="btn btn-success btn-sm" onclick="useTemplate(${t.id})"><i class="bi bi-check2"></i> 使用</button>
+        <button class="btn btn-outline-secondary btn-sm" onclick="editTemplate(${t.id})"><i class="bi bi-pencil"></i> 编辑</button>
+        <button class="btn btn-outline-danger btn-sm" onclick="delTemplate(${t.id})"><i class="bi bi-trash"></i> 删除</button>
+      </div></div>`;
+  }).join('');
+}
+
+function onAssocChange(){
+  const rb = document.querySelector('input[name="insAssoc"]:checked');
+  const show = rb && rb.value === '1';
+  document.getElementById('insPeriodWrap').style.display = show ? '' : 'none';
+}
+
+function renderTpl(tpl){
+  const box = document.getElementById('tplCols');
+  if(!box) return;  // 旧版一次性导入 UI 已移除
+  if(!tpl || !tpl.length){
+    box.innerHTML = '';
+    return;
+  }
+  const nS = tpl.filter(c=>c.kind==='salary').length;
+  const nI = tpl.filter(c=>c.kind==='insurance').length;
+  const nL = tpl.filter(c=>c.kind==='lit').length;
+  box.innerHTML = '<span class="text-muted me-1" style="font-size:12px">列定义：共 '+tpl.length+'（工资 '+nS+' / 社保 '+nI+(nL?(' / 其他 '+nL):'')+'）</span>' +
+    tpl.map(c=>{
+      const cls = c.kind==='insurance' ? 'badge text-bg-primary'
+        : c.kind==='seq' ? 'badge text-bg-secondary'
+        : c.kind==='lit' ? 'badge text-bg-warning' : 'badge text-bg-light border';
+      return `<span class="${cls}" style="font-weight:500">${escapeHtml(c.label)}</span>`;
+    }).join('');
+}
+
+// 一次性导入（不保存）：仅解析列定义，供预览/临时使用
+async function importTpl(){
+  const el = document.getElementById('tplFile');
+  const file = el ? el.files[0] : null;
+  if(!file){ showToast('请选择模板文件','error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/payslip/template/preview', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'导入失败','error'); return; }
+  pendingTpl = {name: file.name, columns: data.columns, fileEl: file,
+                headfoot: data.headfoot || null, hfEdited: false};
+  renderTpl(data.columns);
+  const ps = (data.headfoot && data.headfoot.per_sheet) || {};
+  const hfSheets = Object.keys(ps).filter(nm=>{
+    const c = ps[nm] || {};
+    return (c.header_after && c.header_after.length) || (c.footer_after && c.footer_after.length);
+  });
+  const taxOn = !!(data.headfoot && data.headfoot.tax && data.headfoot.tax.enabled);
+  let info = '已识别 ' + data.columns.length + ' 列';
+  if(data.unknown && data.unknown.length) info += '，未识别：' + data.unknown.join('、') + '（将按列顺序套用格式）';
+  info += '。';
+  if(hfSheets.length) info += '已识别 ' + hfSheets.length + ' 张表的表头表脚（' + hfSheets.join('、') + '）';
+  else info += '未识别到表头表脚';
+  if(taxOn) info += '；已识别个税列（' + (data.headfoot.tax.source || '') + ' → ' + (data.headfoot.tax.target || '') + '）';
+  info += ' 可点「编辑配置」查看调整。';
+  document.getElementById('tplImportInfo').textContent = info;
+  document.getElementById('tplImportActions').style.display = '';
+  showToast('模板已导入','success');
+}
+
+async function saveTemplate(){
+  if(!pendingTpl){ showToast('请先导入模板','error'); return; }
+  const name = document.getElementById('tplSaveName').value.trim() || pendingTpl.name.replace(/\.[^.]+$/, '');
+  const fd = new FormData();
+  fd.append('file', pendingTpl.fileEl);
+  fd.append('name', name);
+  if(pendingTpl.hfEdited && pendingTpl.headfoot){
+    // 用户已手动编辑过配置 -> 显式传入（后端优先使用）
+    fd.append('headfoot', JSON.stringify(pendingTpl.headfoot));
+  } else {
+    // 未编辑 -> 由后端按文件自动提取按 sheet 表头表脚 + 个税
+    fd.append('auto_hf', '1');
+  }
+  const r = await fetch('/api/payslip/templates', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'保存失败','error'); return; }
+  pendingTpl = null;
+  document.getElementById('tplImportActions').style.display = 'none';
+  document.getElementById('tplFile').value = '';
+  await loadTplLibrary();
+  selectTemplate({type:'saved', id:data.id, name:data.name, columns:data.columns,
+                  has_file:data.has_file, has_headfoot:data.has_headfoot,
+                  headfoot:data.headfoot, tax:data.tax});
+  showToast('已存为固定模板：' + data.name, 'success');
+}
+
+function useOneshot(){
+  if(!pendingTpl){ showToast('请先导入模板','error'); return; }
+  selectTemplate({type:'oneshot', name:pendingTpl.name, columns:pendingTpl.columns,
+                  file:pendingTpl.fileEl, headfoot:pendingTpl.headfoot});
+  pendingTpl = null;
+  document.getElementById('tplImportActions').style.display = 'none';
+  document.getElementById('tplFile').value = '';
+}
+
+function cancelImportChoice(){
+  pendingTpl = null;
+  document.getElementById('tplImportActions').style.display = 'none';
+  document.getElementById('tplFile').value = '';
+}
+
+function selectTemplate(t){
+  selectedTemplate = t;
+  renderTpl(t.columns);
+  const badge = document.getElementById('selTplBadge');
+  const tag = t.type==='saved'
+    ? ('固定模板：' + t.name + (t.has_file ? '（含样式）' : '')
+      + (t.has_headfoot ? '（含表头表脚）' : '')
+      + (t.tax && t.tax.enabled ? '（含个税）' : ''))
+    : ('临时模板：' + t.name + '（含样式）' + (t.headfoot ? '（含表头表脚' + (t.headfoot.tax && t.headfoot.tax.enabled ? '＋个税' : '') + '）' : ''));
+  badge.textContent = tag;
+  badge.style.display = '';
+  renderTplLibrary();
+  showToast('已选择模板', 'success');
+}
+
+async function useTemplate(id){
+  const r = await fetch('/api/payslip/templates/'+id);
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'获取失败','error'); return; }
+  selectTemplate({type:'saved', id:id, name:data.name, columns:data.columns,
+                  has_file:data.has_file, has_headfoot:data.has_headfoot,
+                  headfoot:data.headfoot, tax:data.tax});
+}
+
+// ===== 模板配置编辑器（按 sheet 表头表脚 + 个税） =====
+function cssId(s){ return 'sh' + String(s).replace(/[^A-Za-z0-9_\u4e00-\u9fa5]/g, '_'); }
+
+function emptyHeadfoot(){
+  return {per_sheet: {}, tax: {enabled: false, target: '税额-所得税', source: '税前合计', method: 'cum', threshold: 5000, mode: 'keep'}};
+}
+
+// 打开编辑器：pending = 编辑导入后未保存的配置；saved = 编辑固定模板
+function showTplEditor(headfoot, sheetNames, ctx){
+  editTplCtx = ctx;
+  const area = document.getElementById('tplEditArea');
+  const hf = (headfoot && typeof headfoot === 'object') ? headfoot : emptyHeadfoot();
+  const per = hf.per_sheet || {};
+  const tax = hf.tax || {enabled: false, target: '税额-所得税', source: '税前合计', method: 'cum', threshold: 5000, mode: 'keep'};
+  const names = (sheetNames && sheetNames.length) ? sheetNames : Object.keys(per);
+  let html = '<div class="border rounded p-2 bg-white">';
+  html += '<div class="d-flex gap-2 flex-wrap align-items-center mb-2">';
+  html += '<b style="font-size:13px">' + (ctx.mode === 'saved' ? '编辑模板配置：' + escapeHtml(ctx.name || '') : '模板配置（保存前可调整）') + '</b>';
+  if(ctx.mode === 'saved'){
+    html += '<input type="text" id="editName" class="form-control form-control-sm" style="width:180px" value="' + escapeHtml(ctx.name || '') + '" placeholder="模板名称">';
+    html += '<input type="file" id="editFile" class="form-control form-control-sm" style="max-width:240px" accept=".xlsx,.xls,.csv">';
+    html += '<span class="text-muted" style="font-size:12px">可重新上传样式文件</span>';
+  }
+  html += '</div>';
+  if(!names.length){
+    html += '<div class="text-muted mb-2" style="font-size:12px">该模板未识别到工作表配置。可在下方“添加工作表”中输入表名（需与校验文件的 sheet 名一致）。</div>';
+    html += '<div class="d-flex gap-2 align-items-center mb-2"><input type="text" id="newSheetName" class="form-control form-control-sm" style="width:180px" placeholder="工作表名，如：明细表">' +
+            '<button class="btn btn-outline-primary btn-sm" onclick="addSheetRow()"><i class="bi bi-plus"></i> 添加</button></div>';
+  }
+  names.forEach(nm=>{
+    const cfg = per[nm] || {header_after: [], footer_after: []};
+    const htxt = (cfg.header_after || []).map(r => r.join('\t')).join('\n');
+    const ftxt = (cfg.footer_after || []).map(r => r.join('\t')).join('\n');
+    const idn = cssId(nm);
+    html += '<div class="border rounded p-2 my-2" style="background:#fbfdff">';
+    html += '<div class="d-flex justify-content-between align-items-center"><b style="font-size:12px">工作表：' + escapeHtml(nm) + '</b>';
+    html += '<button class="btn btn-outline-danger btn-sm" onclick="removeSheetRow(\'' + idn + '\',\'' + nm.replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')"><i class="bi bi-x"></i> 移除</button></div>';
+    html += '<div class="row g-1 mt-1">';
+    html += '<div class="col-md-6"><label class="modal-label mb-0" style="font-size:12px">表头（每行一条，多列用制表符分隔）</label>';
+    html += '<textarea id="hfA_' + idn + '" rows="3" class="form-control form-control-sm" style="font-size:12px">' + escapeHtml(htxt) + '</textarea></div>';
+    html += '<div class="col-md-6"><label class="modal-label mb-0" style="font-size:12px">表脚（每行一条，多列用制表符分隔）</label>';
+    html += '<textarea id="hfF_' + idn + '" rows="3" class="form-control form-control-sm" style="font-size:12px">' + escapeHtml(ftxt) + '</textarea></div>';
+    html += '</div></div>';
+  });
+  html += '<div class="border rounded p-2 my-2" style="background:#fffaf0">';
+  html += '<b style="font-size:12px"><i class="bi bi-calculator"></i> 个税自动填充（点“导出生成新表格”时生效）</b>';
+  html += '<div class="text-muted" style="font-size:11px">默认保留导入文件中已填的税额（税务系统精确值，含专项附加扣除）；仅空缺行按 (税前合计−起征点)×税率 计算兜底。</div>';
+  html += '<div class="d-flex gap-2 flex-wrap align-items-center mt-1">';
+  html += '<label class="colset-label mb-0"><input type="checkbox" id="taxOn" ' + (tax.enabled ? 'checked' : '') + '> 启用</label>';
+  html += '<label class="modal-label mb-0">来源列</label><input type="text" id="taxSource" class="form-control form-control-sm" style="width:110px" value="' + escapeHtml(tax.source || '') + '">';
+  html += '<label class="modal-label mb-0">目标列</label><input type="text" id="taxTarget" class="form-control form-control-sm" style="width:110px" value="' + escapeHtml(tax.target || '') + '">';
+  html += '<label class="modal-label mb-0">算法</label><select id="taxMethod2" class="form-select form-select-sm" style="width:auto">';
+  html += '<option value="cum"' + (tax.method === 'month' ? '' : ' selected') + '>累计预扣法（年度）</option>';
+  html += '<option value="month"' + (tax.method === 'month' ? ' selected' : '') + '>按月扣缴（月度）</option>';
+  html += '</select>';  html += '<label class="modal-label mb-0">处理方式</label><select id="taxMode" class="form-select form-select-sm" style="width:auto">';  html += '<option value="keep"' + (tax.mode === 'calc' ? '' : ' selected') + '>保留已有税额（推荐）</option>';  html += '<option value="calc"' + (tax.mode === 'calc' ? ' selected' : '') + '>全部按公式重算</option>';  html += '</select>';  html += '<label class="modal-label mb-0">起征点</label><input type="number" id="taxThreshold" class="form-control form-control-sm" style="width:90px" min="0" step="100" value="' + (parseFloat(tax.threshold) || 5000) + '">';  html += '<span class="text-muted" style="font-size:11px">元/月（基数=税前合计−起征点）</span>';  html += '</div></div>';
+  html += '<div class="d-flex gap-2">';
+  html += '<button class="btn btn-success btn-sm" onclick="saveTplEdit()"><i class="bi bi-save"></i> 保存配置</button>';
+  html += '<button class="btn btn-outline-secondary btn-sm" onclick="cancelEdit()">取消</button>';
+  html += '</div></div>';
+  area.style.display = '';
+  area.innerHTML = html;
+}
+
+function addSheetRow(){
+  const nm = (document.getElementById('newSheetName').value || '').trim();
+  if(!nm){ showToast('请输入工作表名','error'); return; }
+  const hf = (pendingTpl && pendingTpl.headfoot) || emptyHeadfoot();
+  if(!hf.per_sheet) hf.per_sheet = {};
+  hf.per_sheet[nm] = {header_after: [], footer_after: []};
+  if(editTplCtx && editTplCtx.sheetNames) editTplCtx.sheetNames.push(nm);
+  showTplEditor(hf, Object.keys(hf.per_sheet), editTplCtx);
+}
+
+function removeSheetRow(id, nm){
+  const hf = (pendingTpl && pendingTpl.headfoot) || emptyHeadfoot();
+  if(hf.per_sheet) delete hf.per_sheet[nm];
+  if(editTplCtx && editTplCtx.sheetNames){
+    editTplCtx.sheetNames = editTplCtx.sheetNames.filter(x => x !== nm);
+  }
+  showTplEditor(hf, Object.keys(hf.per_sheet), editTplCtx);
+}
+
+function parseTxtRows(v){
+  return String(v||'').split('\n').map(l => l.replace(/\t+$/g, '').split('\t').map(c => c.trim()))
+    .filter(r => r.some(c => c !== ''));
+}
+
+function collectHfFromEditor(){
+  const names = editTplCtx.sheetNames || [];
+  const per = {};
+  names.forEach(nm=>{
+    const hid = 'hfA_' + cssId(nm), fid = 'hfF_' + cssId(nm);
+    const hEl = document.getElementById(hid), fEl = document.getElementById(fid);
+    if(!hEl && !fEl) return;
+    per[nm] = {
+      header_after: hEl ? parseTxtRows(hEl.value) : [],
+      footer_after: fEl ? parseTxtRows(fEl.value) : []
+    };
+  });
+  const tax = {
+    enabled: document.getElementById('taxOn').checked,
+    target: (document.getElementById('taxTarget').value || '').trim(),
+    source: (document.getElementById('taxSource').value || '').trim(),
+    method: document.getElementById('taxMethod2').value,
+    threshold: parseFloat(document.getElementById('taxThreshold').value) || 0,
+    mode: document.getElementById('taxMode') ? (document.getElementById('taxMode').value || 'keep') : 'keep'
+  };
+  return {per_sheet: per, tax: tax};
+}
+
+async function saveTplEdit(){
+  if(!editTplCtx) return;
+  const hf = collectHfFromEditor();
+  if(editTplCtx.mode === 'pending'){
+    // 写回一次性导入的待保存配置
+    pendingTpl.headfoot = hf;
+    pendingTpl.hfEdited = true;
+    cancelEdit();
+    showToast('已更新配置，可再「存为固定模板」', 'success');
+    return;
+  }
+  const fd = new FormData();
+  fd.append('headfoot', JSON.stringify(hf));
+  const nameEl = document.getElementById('editName');
+  if(nameEl && (nameEl.value || '').trim()) fd.append('name', nameEl.value.trim());
+  const fileEl = document.getElementById('editFile');
+  if(fileEl && fileEl.files[0]) fd.append('file', fileEl.files[0]);
+  const r = await fetch('/api/payslip/templates/' + editTplCtx.id, {method:'PUT', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'保存失败','error'); return; }
+  cancelEdit();
+  await loadTplLibrary();
+  if(selectedTemplate && selectedTemplate.type==='saved' && selectedTemplate.id === editTplCtx.id){
+    selectTemplate({type:'saved', id:data.id, name:data.name, columns:data.columns,
+                    has_file:data.has_file, has_headfoot:data.has_headfoot,
+                    headfoot:data.headfoot, tax:data.tax});
+  }
+  showToast('模板已更新', 'success');
+}
+
+function editPendingTpl(){
+  if(!pendingTpl) return;
+  const hf = pendingTpl.headfoot || emptyHeadfoot();
+  const names = hf.per_sheet ? Object.keys(hf.per_sheet) : [];
+  showTplEditor(hf, names, {mode: 'pending', sheetNames: names});
+}
+
+function editTemplate(id){
+  const t = tplLibraryItems.find(x=>x.id===id);
+  if(!t) return;
+  const hf = (t.headfoot && typeof t.headfoot === 'object') ? t.headfoot : null;
+  const names = (hf && hf.per_sheet) ? Object.keys(hf.per_sheet) : [];
+  showTplEditor(hf, names, {mode: 'saved', id: id, name: t.name, sheetNames: names});
+}
+
+function cancelEdit(){
+  editTplCtx = null;
+  const area = document.getElementById('tplEditArea');
+  area.style.display = 'none';
+  area.innerHTML = '';
+}
+
+async function delTemplate(id){
+  confirmAction('确定删除该固定模板？', async ()=>{
+    const r = await fetch('/api/payslip/templates/'+id, {method:'DELETE'});
+    const data = await r.json().catch(()=>({}));
+    if(!r.ok){ showToast(data.error||'删除失败','error'); return; }
+    if(selectedTemplate && selectedTemplate.type==='saved' && selectedTemplate.id===id){
+      selectedTemplate = null;
+      document.getElementById('selTplBadge').style.display = 'none';
+    }
+    await loadTplLibrary();
+    showToast('已删除', 'success');
+  }, true);
+}
+
+async function downloadTplSample(){
+  const r = await fetch('/api/payslip/template/sample');
+  if(!r.ok){ showToast('下载失败','error'); return; }
+  const blob = await r.blob();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '工资表生成模板.xlsx';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
+function insAssoc(){
+  const rb = document.querySelector('input[name="insAssoc"]:checked');
+  return !!(rb && rb.value === '1');
+}
+
+async function genPreview(){
+  const period = document.getElementById('genPeriod').value;
+  const associate = insAssoc();
+  const insPeriod = document.getElementById('insPeriod').value;
+  const r = await fetch('/api/payslip/generate', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({period: period, associate: associate, ins_period: associate ? insPeriod : '',
+      columns: null, template_id: null})});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'生成失败','error'); return; }
+  genGrid = data.grid;
+  const head = data.grid[0] || [];
+  const rows = data.grid.slice(1);
+  let html = '<div class="text-muted mb-1" style="font-size:12px">共 ' + data.total + ' 条，' +
+    (associate ? ('已关联 ' + (insPeriod || period || '全部') + ' 五险一金数据') : '未关联社保（直接使用导入工资数据）') + '，预览前 50 行：</div>';
+  html += '<table class="table table-sm table-bordered ps-table"><thead><tr>' +
+    head.map(h=>`<th>${escapeHtml(h)}</th>`).join('') + '</tr></thead><tbody>';
+  rows.slice(0,50).forEach(rw=>{ html += '<tr>' + rw.map(c=>`<td>${c===''?'&nbsp;':escapeHtml(c)}</td>`).join('') + '</tr>'; });
+  html += '</tbody></table>';
+  document.getElementById('genPreview').innerHTML = html;
+  showToast('预览生成成功','success');
+}
+
+async function genExport(){
+  if(!genGrid){ showToast('请先预览生成','error'); return; }
+  const fd = new FormData();
+  fd.append('period', document.getElementById('genPeriod').value);
+  fd.append('associate', insAssoc() ? '1' : '0');
+  fd.append('ins_period', insAssoc() ? document.getElementById('insPeriod').value : '');
+  fd.append('columns', '');   // 为空 -> 后端使用全局生效模板（导入覆盖）
+  fd.append('header_rows', document.getElementById('genHeader').value);
+  fd.append('footer_rows', document.getElementById('genFooter').value);
+  fd.append('headfoot', headFootTpl ? JSON.stringify(headFootTpl) : '');
+  fd.append('filename', '工资表(生成).xlsx');
+  await postDownloadForm('/api/payslip/generate/export', fd);
+}
+
+// ===== 文件下载（表单 multipart 返回二进制） =====
+async function postDownloadForm(url, fd){
+  const r = await fetch(url, {method:'POST', body:fd});
+  if(!r.ok){
+    const d = await r.json().catch(()=>({}));
+    showToast(d.error || '导出失败', 'error');
+    return;
+  }
+  const blob = await r.blob();
+  const cd = r.headers.get('Content-Disposition') || '';
+  let name = '工资表.xlsx';
+  // 优先取 filename*（RFC 5987 中文名），否则取 filename 兜底
+  let m = cd.match(/filename\*=(?:UTF-8'')?([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+  if(m) name = decodeURIComponent(m[1].trim());
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  showToast('已导出', 'success');
+}
+
+// ===== 文件下载（POST 返回二进制） =====
+async function postDownload(url, body){
+  const r = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(!r.ok){
+    const d = await r.json().catch(()=>({}));
+    showToast(d.error || '导出失败', 'error');
+    return;
+  }
+  const blob = await r.blob();
+  const cd = r.headers.get('Content-Disposition') || '';
+  let name = '工资表.xlsx';
+  // 优先取 filename*（RFC 5987 中文名），否则取 filename 兜底
+  let m = cd.match(/filename\*=(?:UTF-8'')?([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
+  if(m) name = decodeURIComponent(m[1].trim());
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+  showToast('已导出', 'success');
+}
+
+loadGenMeta();
+loadTplLibrary();
+loadHeadFoot();
+</script>
+{% endblock %}

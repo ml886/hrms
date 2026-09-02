@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}{{ sys_title }}{% endblock %}</title>
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+<style>
+  :root{
+    --primary:#2c5aa0; --primary-dark:#1f4373; --bg:#f4f6fa; --sidebar:#1f2937;
+    --sidebar-active:#2c5aa0; --success:#10b981; --warn:#f59e0b; --danger:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:'Segoe UI',-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;background:var(--bg);color:#1f2937;font-size:14px}
+  .layout{display:flex;min-height:100vh}
+  .sidebar{width:220px;background:var(--sidebar);color:#cbd5e1;position:fixed;top:0;bottom:0;left:0;overflow-y:auto;z-index:100}
+  .sidebar .brand{padding:18px 20px;font-size:16px;font-weight:700;color:#fff;border-bottom:1px solid #374151;display:flex;align-items:center;gap:8px}
+  .sidebar .brand i{color:#60a5fa;font-size:20px}
+  .sidebar .brand .cb-static{display:flex;align-items:flex-start;gap:8px;width:100%;color:#fff;line-height:1.3;white-space:normal}
+  .sidebar .brand .cb-static .cb-logo{flex:0 0 auto;align-self:flex-start;margin-top:1px}
+  .sidebar .brand .dropdown{width:100%}
+  /* Bootstrap 的 .dropdown-toggle 会给 button 设置 white-space:nowrap，必须在自定义按钮上覆盖回来 */
+  .sidebar .brand .cb-btn{width:100%;display:flex;align-items:flex-start;gap:8px;background:transparent;border:1px solid transparent;color:#fff;padding:2px 4px;border-radius:8px;font-size:16px;font-weight:700;text-align:left;white-space:normal;line-height:1.3}
+  .sidebar .brand .cb-btn:hover,.sidebar .brand .cb-btn:focus{background:#374151;color:#fff;box-shadow:none}
+  /* 隐藏 Bootstrap .dropdown-toggle 自动注入的 ::after 小三角，只保留自定义 chevron，避免两个箭头 */
+  .sidebar .brand .cb-btn.dropdown-toggle::after{display:none;content:none}
+  /* logo 顶对齐首行；箭头锁定首行右端，圆角胶囊底，展开时旋转 */
+  .sidebar .brand .cb-btn .cb-logo{flex:0 0 auto;align-self:flex-start;margin-top:1px}
+  .sidebar .brand .cb-btn .bi-chevron-down{flex:0 0 auto;align-self:flex-start;margin-left:auto;margin-right:6px;margin-top:3px;font-size:11px;color:#cbd5e1;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:6px;background:rgba(148,163,184,.18);transition:transform .15s ease,background .15s ease}
+  .sidebar .brand .cb-btn:hover .bi-chevron-down{background:rgba(148,163,184,.32);color:#fff}
+  .sidebar .brand .dropdown.show .cb-btn .bi-chevron-down{transform:rotate(180deg)}
+  /* 公司名固定每行 7 个字（7em 列宽强制折行），不随容器拉伸 */
+  .sidebar .brand .cb-name{flex:0 0 7em;width:7em;min-width:0;word-break:break-word;line-height:1.3}
+  .sidebar .brand .cb-logo{height:36px;width:36px;object-fit:contain;border-radius:8px;background:#fff;padding:3px}
+  .sidebar .brand .dropdown-menu{background:#1f2937;border:1px solid #334155;min-width:210px;margin-top:6px}
+  .sidebar .brand .dropdown-item{display:flex;align-items:center;gap:8px;color:#cbd5e1;padding:8px 14px;font-size:13px;white-space:normal}
+  .sidebar .brand .dropdown-item span{word-break:break-word;line-height:1.25}
+  .sidebar .brand .dropdown-item:hover{background:#374151;color:#fff}
+  .sidebar .brand .dropdown-item.active{background:var(--sidebar-active);color:#fff}
+  .sidebar .brand .cb-logo-sm{height:18px;width:18px;object-fit:contain;border-radius:4px;background:#fff;padding:1px}
+  /* 登录后「选择公司」弹窗浮层 */
+  .company-select-overlay{position:fixed;inset:0;background:rgba(17,24,39,.55);z-index:2000;display:flex;align-items:center;justify-content:center;padding:20px}
+  .company-select-box{background:#fff;border-radius:14px;max-width:880px;width:100%;max-height:90vh;overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .company-select-box .cs-head{padding:18px 22px 0}
+  .company-select-box .cs-body{padding:6px 22px 18px}
+  .company-pick{transition:transform .12s,box-shadow .12s,border-color .12s}
+  .company-pick:hover{transform:translateY(-2px);border-color:#60a5fa!important;box-shadow:0 6px 18px rgba(96,165,250,.18)}
+  .company-pick .cp-logo-box{width:84px;height:84px;border-radius:12px;border:1px solid #eef2f7;background:#fff;
+    display:flex;align-items:center;justify-content:center;padding:8px;margin:0 auto 10px;overflow:hidden}
+  .company-pick .cp-logo{width:100%;height:100%;object-fit:contain}
+  .company-pick .cp-logo-fallback{width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:34px;color:#cbd5e1}
+  .company-pick.loading{opacity:.55;pointer-events:none}
+  /* 选择公司浮层：小卡片按数量均匀铺满，超出自动换行 */
+  .company-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-top:4px}
+  .company-cards .company-pick{width:100%}
+  .brand-logo{height:24px;width:24px;object-fit:contain;border-radius:6px;background:#fff;padding:2px}
+  .sidebar a.nav-item{display:flex;align-items:center;gap:10px;padding:11px 20px;color:#cbd5e1;text-decoration:none;border-left:3px solid transparent;transition:all .15s}
+  .sidebar a.nav-item:hover{background:#374151;color:#fff}
+  .sidebar a.nav-item.active{background:var(--sidebar-active);color:#fff;border-left-color:#60a5fa}
+  .sidebar a.nav-item i{width:18px;text-align:center}
+  /* 一级菜单：可展开容器（薪酬绩效管理） */
+  .sidebar .nav-parent{cursor:pointer;user-select:none}
+  .sidebar .nav-parent .nav-arrow{margin-left:auto;font-size:11px;color:#94a3b8;transition:transform .2s}
+  .sidebar .nav-parent.open .nav-arrow{transform:rotate(180deg)}
+  .sidebar .nav-parent.open{color:#fff}
+  /* 二级菜单：默认折叠，与一级有明显区别 */
+  .sidebar .nav-children{display:none;background:#161f2e;padding:2px 0 6px}
+  .sidebar .nav-children.open{display:block}
+  .sidebar .nav-children .nav-sub{padding:9px 20px 9px 48px;font-size:12.5px;color:#9ca3af;border-left:3px solid transparent;position:relative}
+  .sidebar .nav-children .nav-sub::before{content:'';position:absolute;left:36px;top:50%;width:7px;height:1px;background:#4b5563}
+  .sidebar .nav-children .nav-sub:hover{background:#2b3648;color:#fff}
+  .sidebar .nav-children .nav-sub.active{background:var(--sidebar-active);color:#fff;border-left-color:#60a5fa}
+  .sidebar .nav-children .nav-sub.active::before{background:#60a5fa}
+  .sidebar .nav-children .nav-sub i{font-size:15px}
+  .main{flex:1;margin-left:220px;display:flex;flex-direction:column;min-width:0}
+  .topbar{height:56px;background:#fff;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;justify-content:space-between;padding:0 24px;position:sticky;top:0;z-index:50}
+  .topbar .page-title{font-size:16px;font-weight:600}
+  .topbar .right{display:flex;align-items:center;gap:16px}
+  .clock{font-size:13px;color:#6b7280;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .bell-wrap{position:relative}
+  .bell{font-size:20px;color:#6b7280;cursor:pointer;background:none;border:none;position:relative}
+  .bell .badge{position:absolute;top:-6px;right:-6px;background:var(--danger);color:#fff;border-radius:10px;font-size:11px;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;padding:0 4px}
+  .bell-pop{position:absolute;top:42px;right:0;width:320px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 10px 25px rgba(0,0,0,.15);display:none;z-index:200;max-height:400px;overflow-y:auto}
+  .bell-pop.show{display:block}
+  .bell-pop .head{padding:12px 16px;border-bottom:1px solid #e5e7eb;font-weight:600}
+  .bell-pop .item{padding:10px 16px;border-bottom:1px solid #f3f4f6;display:flex;justify-content:space-between;gap:8px}
+  .bell-pop .item:last-child{border-bottom:none}
+  .bell-pop .item .t{font-weight:500}
+  .bell-pop .item .d{font-size:12px;color:#6b7280}
+  .bell-pop .empty{padding:24px;text-align:center;color:#9ca3af}
+  .user-chip{display:flex;align-items:center;gap:8px}
+  .avatar{width:30px;height:30px;border-radius:50%;background:var(--primary);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:13px}
+  .content{padding:24px;flex:1;min-width:0}
+  .card{background:#fff;border-radius:10px;box-shadow:0 1px 3px rgba(0,0,0,.06);border:1px solid #e5e7eb;margin-bottom:20px}
+  .card-body{padding:20px}
+  .btn-primary{background:var(--primary);border-color:var(--primary)}
+  .btn-primary:hover{background:var(--primary-dark);border-color:var(--primary-dark)}
+  .table{margin:0}
+  .table thead th{background:#f9fafb;border-bottom:2px solid #e5e7eb;font-weight:600;color:#374151;font-size:13px}
+  .table tbody tr:hover{background:#f9fafb}
+  .badge-status{padding:4px 10px;border-radius:12px;font-size:12px;font-weight:500}
+  .badge-active{background:#d1fae5;color:#065f46}
+  .badge-expired{background:#fee2e2;color:#991b1b}
+  .badge-terminated{background:#e5e7eb;color:#4b5563}
+  .badge-resigned{background:#fee2e2;color:#991b1b}
+  .badge-in-service{background:#d1fae5;color:#065f46}
+  .badge-retired{background:#ede9fe;color:#6d28d9}
+  .badge-priority-high{background:#fee2e2;color:#991b1b}
+  .badge-priority-mid{background:#fef3c7;color:#92400e}
+  .badge-priority-low{background:#dbeafe;color:#1e40af}
+  .level-red{color:var(--danger);font-weight:600}
+  .level-yellow{color:var(--warn);font-weight:600}
+  .stat-card{background:#fff;border-radius:10px;padding:20px;border:1px solid #e5e7eb;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+  .stat-card .label{color:#6b7280;font-size:13px;margin-bottom:6px}
+  .stat-card .num{font-size:30px;font-weight:700;color:#1f2937}
+  .stat-card.success .num{color:var(--success)}
+  .stat-card.danger .num{color:var(--danger)}
+  .stat-card.warn .num{color:var(--warn)}
+  .stat-card.retired .num{color:#7c3aed}
+  a .stat-card{transition:transform .15s,box-shadow .15s}
+  a .stat-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.1);cursor:pointer}
+  .filter-bar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:16px}
+  .filter-bar input,.filter-bar select{padding:6px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px}
+  .modal-label{font-weight:600;font-size:13px;color:#000;margin-bottom:4px;display:block}
+  .form-control,.form-select{font-size:13px}
+  /* 编辑弹窗内：框内容12px */
+  .modal .form-control,.modal .form-select{font-size:12px}
+  .empty{text-align:center;padding:48px;color:#9ca3af}
+  .role-tag{font-size:11px;background:#e0e7ff;color:#3730a3;padding:2px 6px;border-radius:4px;margin-left:6px}
+  th.sortable{cursor:pointer;user-select:none;white-space:nowrap}
+  th.sortable:hover{background:#eef2f7}
+  .sort-icon{font-size:10px;color:#9ca3af;margin-left:4px}
+  th.sortable.asc .sort-icon::before{content:'▲';color:#2c5aa0}
+  th.sortable.desc .sort-icon::before{content:'▼';color:#2c5aa0}
+  td.emp-name{color:#2c5aa0;font-weight:600;cursor:pointer}
+  td.emp-name:hover{text-decoration:underline}
+  .toast-container{position:fixed;top:20px;right:20px;z-index:9999}
+  .toast-msg{background:#1f2937;color:#fff;padding:10px 18px;border-radius:6px;margin-bottom:8px;box-shadow:0 4px 12px rgba(0,0,0,.2);min-width:240px}
+  .toast-msg.success{background:var(--success)}
+  .toast-msg.error{background:var(--danger)}
+  /* ===== 全站统一美化 ===== */
+  /* 滚动条统一 */
+  ::-webkit-scrollbar{width:8px;height:8px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:#c7d2e0;border-radius:4px}
+  ::-webkit-scrollbar-thumb:hover{background:#9aa8bd}
+  /* 表格单元格垂直居中 */
+  .table td,.table th{vertical-align:middle}
+  /* 分页主色统一（Bootstrap pagination） */
+  .page-item.active .page-link{background:var(--primary);border-color:var(--primary)}
+  .page-link{color:var(--primary)}
+  .page-link:hover{color:var(--primary-dark)}
+  /* 表单控件焦点统一 */
+  .form-control:focus,.form-select:focus{border-color:#93b4e8;box-shadow:0 0 0 .2rem rgba(44,90,160,.12)}
+  /* 通用小图标按钮悬停反馈 */
+  .btn-outline-secondary,.btn-outline-primary,.btn-outline-danger,.btn-outline-success,.btn-outline-warning{transition:all .12s}
+  /* 弹窗标题统一 */
+  .modal-title{font-weight:700;font-size:15px}
+  /* 卡片标题统一（h5/h6 首行） */
+  .card h5[style*="margin:0"],.card-body h5{letter-spacing:.2px}
+  footer{text-align:center;color:#9ca3af;padding:12px 20px;font-size:12px;background:#fff;border-top:1px solid #e5e7eb;flex-shrink:0}
+  /* 水印：覆盖页面内容（高于 topbar/sidebar），但低于弹窗(toast/confirm/modal)，避免遮挡交互 */
+  .watermark-overlay{position:fixed;inset:0;z-index:150;pointer-events:none;overflow:hidden}
+  .watermark-overlay .wm-line{position:absolute;width:400px;text-align:center;font-size:16px;color:rgba(44,90,160,.06);font-weight:600;letter-spacing:2px;white-space:nowrap;transform:rotate(-30deg);user-select:none}
+</style>
+</head>
+<body>
+{% if not error_404 and not error_403 %}
+<!-- 页面水印 -->
+<div class="watermark-overlay" id="watermarkBox"></div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="brand">
+      {% if current_user.is_authenticated and current_company %}
+        {% if my_companies|length > 1 %}
+        <div class="dropdown">
+          <button class="cb-btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false">
+            <img src="{{ company_logo_url }}" class="cb-logo" alt="logo" onerror="this.style.display='none'">
+            <span class="cb-name">{{ current_company.name }}</span>
+            <i class="bi bi-chevron-down"></i>
+          </button>
+          <ul class="dropdown-menu">
+            {% for cmp in my_companies %}
+            <li><a class="dropdown-item {{ 'active' if current_company.id==cmp.id }}" href="javascript:switchCompany({{ cmp.id }})">
+              <img src="/company-logo/{{ cmp.id }}" class="cb-logo-sm" alt="" onerror="this.style.display='none'">
+              <span>{{ cmp.name }}</span></a></li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% else %}
+        <div class="cb-static">
+          <img src="{{ company_logo_url }}" class="cb-logo" alt="logo" onerror="this.style.display='none'">
+          <span class="cb-name">{{ current_company.name }}</span>
+        </div>
+        {% endif %}
+      {% else %}
+        {% if logo_url %}<img src="{{ logo_url }}" class="brand-logo" alt="logo">{% else %}<i class="bi bi-people-fill"></i>{% endif %}
+        <span>{{ sys_title }}</span>
+      {% endif %}
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="nav-item {{ 'active' if request.endpoint=='dashboard' }}">
+      <i class="bi bi-speedometer2"></i> 工作看板</a>
+    {% if can_view_module('employee') %}
+    <a href="{{ url_for('lifecycle_page') }}" class="nav-item {{ 'active' if request.endpoint=='lifecycle_page' }}">
+      <i class="bi bi-person-badge"></i> 员工信息管理</a>
+    {% endif %}
+    {% if can_view_module('insurance') %}
+    <a href="{{ url_for('insurance_summary_page') }}" class="nav-item {{ 'active' if request.endpoint in ('insurance_summary_page','insurance_import_page') }}">
+      <i class="bi bi-shield-check"></i> 五险一金管理</a>
+    {% endif %}
+    {% if can_view_module('salary') %}
+    {% set salary_active = request.endpoint in ('salary_detail_page','salary_summary_page','tax_page') %}
+    <div class="nav-group">
+      <a href="javascript:void(0)" class="nav-item nav-parent {{ 'active open' if salary_active }}" onclick="toggleNavGroup(this)">
+        <i class="bi bi-cash-stack"></i> 薪酬绩效管理
+        <i class="bi bi-chevron-down nav-arrow"></i>
+      </a>
+      <div class="nav-children {{ 'open' if salary_active }}">
+        <a href="{{ url_for('salary_summary_page') }}" class="nav-item nav-sub {{ 'active' if request.endpoint=='salary_summary_page' }}">
+          <i class="bi bi-table"></i> 工资表汇总制作</a>
+        <a href="{{ url_for('salary_detail_page') }}" class="nav-item nav-sub {{ 'active' if request.endpoint=='salary_detail_page' }}">
+          <i class="bi bi-list-ul"></i> 工资明细查询</a>
+        <a href="{{ url_for('tax_page') }}" class="nav-item nav-sub {{ 'active' if request.endpoint=='tax_page' }}">
+          <i class="bi bi-receipt"></i> 个税管理</a>
+      </div>
+    </div>
+    {% endif %}
+    {% if can_view_module('todos') %}
+    <a href="{{ url_for('todos_page') }}" class="nav-item {{ 'active' if request.endpoint=='todos_page' }}">
+      <i class="bi bi-list-check"></i> 待办事项管理</a>
+    {% endif %}
+    {% if can_view_module('logs') %}
+    <a href="{{ url_for('logs_page') }}" class="nav-item {{ 'active' if request.endpoint=='logs_page' }}">
+      <i class="bi bi-clock-history"></i> 操作记录查询</a>
+    {% endif %}
+    {% if can_view_module('dicts') %}
+    <a href="{{ url_for('dicts_page') }}" class="nav-item {{ 'active' if request.endpoint=='dicts_page' }}">
+      <i class="bi bi-sliders"></i> 代码字段维护</a>
+    {% endif %}
+    {% if can_view_module('users') %}
+    <a href="{{ url_for('users_page') }}" class="nav-item {{ 'active' if request.endpoint=='users_page' }}">
+      <i class="bi bi-person-gear"></i> 账号管理</a>
+    {% endif %}
+    {% if can_view_module('backup') %}
+    <a href="{{ url_for('backup_page') }}" class="nav-item {{ 'active' if request.endpoint=='backup_page' }}">
+      <i class="bi bi-database-check"></i> 数据备份</a>
+    {% endif %}
+    {% if current_user.role == 'admin' %}
+    <a href="{{ url_for('settings_page') }}" class="nav-item {{ 'active' if request.endpoint in ('settings_page','companies_page') }}">
+      <i class="bi bi-gear"></i> 系统设置</a>
+    {% endif %}
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <div class="page-title">{% block page_title %}工作看板{% endblock %}</div>
+      <div class="right">
+        <span id="clock" class="clock"></span>
+        <div class="bell-wrap">
+          <button class="bell" id="bellBtn" onclick="toggleBell()">
+            <i class="bi bi-bell"></i>
+            {% if bell_count %}<span class="badge">{{ bell_count }}</span>{% endif %}
+          </button>
+          <div class="bell-pop" id="bellPop">
+            <div class="head">今日到期/提醒</div>
+            <div id="bellItems"></div>
+          </div>
+        </div>
+        <div class="user-chip">
+          <div class="avatar">{{ current_user.name[:1] if current_user.name else 'U' }}</div>
+          <div>
+            <div style="font-weight:600">{{ current_user.name }}
+              {% if current_user.role=='admin' %}<span class="role-tag">管理员</span>
+              {% elif current_user.role=='hr' %}<span class="role-tag">HR</span>
+              {% else %}<span class="role-tag">员工</span>{% endif %}
+            </div>
+          </div>
+        </div>
+        <a href="{{ url_for('logout') }}" class="btn btn-outline-secondary btn-sm">退出</a>
+      </div>
+    </header>
+
+    <main class="content">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for cat, msg in messages %}
+          <div class="alert alert-{{ cat }} alert-dismissible fade show" role="alert">{{ msg }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+          </div>
+        {% endfor %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+    <footer>{{ sys_title }} · v{{ app_version }}</footer>
+  </div>
+</div>
+
+<div class="toast-container" id="toastBox"></div>
+
+<!-- 通用确认弹窗 -->
+<div class="modal fade" id="confirmModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="border-bottom:none;padding-bottom:0">
+        <h6 class="modal-title" style="font-size:14px;font-weight:700"><i class="bi bi-exclamation-triangle-fill" style="color:#f59e0b"></i> 操作确认</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" style="padding-top:8px;font-size:13px;color:#374151" id="confirmMsg"></div>
+      <div class="modal-footer" style="border-top:none;padding-top:0">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" id="confirmOkBtn">确定</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// ================= 全局工具函数（所有页面可用） =================
+// HTML 转义：innerHTML 拼接用户可控数据前必须转义
+function esc(s){
+  if(s === null || s === undefined) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+// 本地日期 YYYY-MM-DD（避免 toISOString 的 UTC 时区偏差）
+function localDateStr(d){
+  const dt = d ? new Date(d) : new Date();
+  if(isNaN(dt.getTime())) return '';
+  return dt.getFullYear() + '-' + String(dt.getMonth()+1).padStart(2,'0') + '-' + String(dt.getDate()).padStart(2,'0');
+}
+// 生成页面水印：账号 + 姓名
+(function(){
+  const box = document.getElementById('watermarkBox');
+  if(!box) return;
+  const username = {{ (current_user.username if current_user else '未登录')|tojson }};
+  const name = {{ (current_user.name if current_user else '')|tojson }};
+  const text = username + ' ' + name;
+  const cols = 4, rows = 8;
+  const stepX = Math.ceil(window.innerWidth / cols);
+  const stepY = Math.ceil(window.innerHeight / rows);
+  let html = '';
+  for(let r=0; r<rows; r++){
+    for(let c=0; c<cols; c++){
+      const x = c*stepX + (r%2 ? 60 : -60);
+      const y = r*stepY;
+      html += `<div class="wm-line" style="left:${x}px;top:${y}px">${esc(text)}</div>`;
+    }
+  }
+  box.innerHTML = html;
+  // 窗口大小变化时重新生成
+  let timer;
+  window.addEventListener('resize', ()=>{
+    clearTimeout(timer);
+    timer = setTimeout(()=>{
+      const wm = document.getElementById('watermarkBox');
+      if(!wm) return;
+      const stepX2 = Math.ceil(window.innerWidth / cols);
+      const stepY2 = Math.ceil(window.innerHeight / rows);
+      let h = '';
+      for(let r=0; r<rows; r++){
+        for(let c=0; c<cols; c++){
+          const x = c*stepX2 + (r%2 ? 60 : -60);
+          const y = r*stepY2;
+          h += `<div class="wm-line" style="left:${x}px;top:${y}px">${esc(text)}</div>`;
+        }
+      }
+      wm.innerHTML = h;
+    }, 300);
+  });
+})();
+
+// 通用二次确认：confirmAction(message, callback, danger)
+function confirmAction(msg, cb, danger){
+  document.getElementById('confirmMsg').innerHTML = msg;
+  const okBtn = document.getElementById('confirmOkBtn');
+  okBtn.className = 'btn btn-sm ' + (danger ? 'btn-danger' : 'btn-primary');
+  okBtn.textContent = '确定';
+  // 移除旧的 on 事件
+  okBtn.onclick = null;
+  okBtn.onclick = function(){
+    const modalEl = document.getElementById('confirmModal');
+    bootstrap.Modal.getInstance(modalEl).hide();
+    cb && cb();
+  };
+  new bootstrap.Modal(document.getElementById('confirmModal')).show();
+}
+function showToast(msg, type){
+  const box = document.getElementById('toastBox');
+  const el = document.createElement('div');
+  el.className = 'toast-msg ' + (type||'');
+  el.textContent = msg;
+  box.appendChild(el);
+  setTimeout(()=>el.remove(), 3000);
+}
+async function api(url, opts={}){
+  opts.headers = opts.headers || {};
+  if(opts.body && !(opts.body instanceof FormData)){
+    opts.headers['Content-Type'] = 'application/json';
+    if(typeof opts.body !== 'string') opts.body = JSON.stringify(opts.body);
+  }
+  const r = await fetch(url, opts);
+  if(r.status===401){ location.href='/login'; return; }
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error || '操作失败', 'error'); return null; }
+  return data;
+}
+function toggleBell(){
+  const pop = document.getElementById('bellPop');
+  pop.classList.toggle('show');
+  if(pop.classList.contains('show')) loadBell();
+}
+// 一级菜单展开/折叠二级菜单（如：薪酬绩效管理）
+function toggleNavGroup(el){
+  const grp = el.parentElement.querySelector('.nav-children');
+  if(grp) grp.classList.toggle('open');
+  el.classList.toggle('open');
+}
+async function loadBell(){
+  const data = await api('/api/todos/bell');
+  if(!data) return;
+  const box = document.getElementById('bellItems');
+  if(data.count===0){ box.innerHTML='<div class="empty">暂无过期未办待办</div>'; return; }
+  box.innerHTML = data.items.map(i=>`<div class="item"><div><div class="t">${i.title}</div><div class="d">截止 ${i.due_date}</div></div><span class="badge-status badge-priority-${i.priority==='高'?'high':i.priority==='中'?'mid':'low'}">${i.priority}</span></div>`).join('');
+}
+// 切换当前管理的公司
+async function switchCompany(cid){
+  const data = await api('/api/set-company', {method:'POST', body: JSON.stringify({company_id: cid})});
+  if(data){ showToast('已切换到「' + (document.querySelector('.dropdown-item.active')?.textContent || '') + '」', 'success'); location.reload(); }
+}
+document.addEventListener('click', e=>{
+  if(!e.target.closest('.bell-wrap')) document.getElementById('bellPop').classList.remove('show');
+});
+setInterval(()=>{ /* 轻量轮询更新角标 */ if(document.querySelector('.bell .badge')!==null) loadBell(); }, 60000);
+// 顶栏实时时钟：yyyy年mm月dd日 星期 hh:mm:ss
+(function(){
+  const el = document.getElementById('clock');
+  if(!el) return;
+  const wd = ['日','一','二','三','四','五','六'];
+  const p = n => String(n).padStart(2,'0');
+  function tick(){
+    const d = new Date();
+    el.textContent = d.getFullYear()+'年'+p(d.getMonth()+1)+'月'+p(d.getDate())+'日 星期'+wd[d.getDay()]+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+  }
+  tick();
+  setInterval(tick, 1000);
+})();
+
+// ===== 右下角待办提醒（全站生效）=====
+const REMIND_INTERVAL = 60 * 1000; // 每次提醒间隔 60 秒
+let reminding = false;
+async function checkReminder(){
+  if(reminding) return; // 防止重复触发
+  const data = await api('/api/todos/reminders');
+  if(!data || data.count===0) return;
+  reminding = true;
+  try{
+    // 逐条弹出（右下角），每条弹出后记录已提醒次数；下次提醒时刻未到则不再弹出
+    for(const item of data.items){
+      const remain = item.remind_count - item.reminded_count;
+      if(remain<=0) continue;
+      showTodoPopup(item);
+      await api('/api/todos/'+item.id+'/ack', {method:'POST'});
+      if(remain>1) await new Promise(r=>setTimeout(r, REMIND_INTERVAL));
+    }
+  } catch(e){}
+  reminding = false;
+}
+function showTodoPopup(item){
+  // 右下角自定义弹窗（不遮挡操作）
+  const box = document.getElementById('remindToastBox') || (()=>{
+    const b = document.createElement('div');
+    b.id = 'remindToastBox';
+    b.style.cssText = 'position:fixed;right:20px;bottom:20px;z-index:10000;display:flex;flex-direction:column;gap:10px;pointer-events:none';
+    document.body.appendChild(b);
+    return b;
+  })();
+  const el = document.createElement('div');
+  el.style.cssText = 'pointer-events:auto;background:#fff;border-radius:10px;width:340px;max-width:92vw;box-shadow:0 12px 40px rgba(0,0,0,.2);border-left:4px solid #2c5aa0;overflow:hidden;animation:toastIn .3s ease';
+  const prioColor = item.priority==='高' ? '#ef4444' : (item.priority==='中' ? '#f59e0b' : '#10b981');
+  el.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#f8fafc;border-bottom:1px solid #eef2f7">
+      <div style="font-weight:700;font-size:14px;color:#2c5aa0"><i class="bi bi-bell-fill"></i> 待办提醒</div>
+      <button onclick="this.closest('div[data-remind]').remove()" style="background:none;border:none;font-size:18px;color:#9ca3af;cursor:pointer;line-height:1">×</button>
+    </div>
+    <div style="padding:14px 16px">
+      <div style="font-weight:600;font-size:14px;color:#111827">${item.title}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px">截止日期：<b>${item.due_date}</b></div>
+      <div style="display:inline-block;margin-top:8px;font-size:12px;font-weight:600;color:${prioColor};background:${prioColor}14;padding:2px 8px;border-radius:10px">优先级：${item.priority}</div>
+      <div style="display:flex;gap:8px;margin-top:14px;justify-content:flex-end">
+        <button class="btn btn-outline-secondary btn-sm" onclick="this.closest('div[data-remind]').remove()">知道了</button>
+        <a href="/todos" class="btn btn-primary btn-sm">去处理</a>
+      </div>
+    </div>`;
+  el.setAttribute('data-remind','1');
+  box.appendChild(el);
+  // 自动消失
+  setTimeout(()=>el.remove(), 15000);
+}
+// 启动时检查一次，之后每 30 秒轮询（在提醒时间段内到达提醒时刻即弹出）
+setTimeout(checkReminder, 1500);
+setInterval(checkReminder, 30000);
+</script>
+
+<!-- 登录后「选择公司」弹窗浮层（多公司未选定时叠加显示） -->
+{% if show_company_modal %}
+<div class="company-select-overlay" id="companySelectOverlay">
+  <div class="company-select-box">
+    <div class="cs-head">
+      <h5 class="mb-1"><i class="bi bi-building text-primary"></i> 请选择要管理的公司</h5>
+      <p class="text-muted" style="font-size:13px;margin-bottom:14px">
+        您当前账号可管理以下公司，选择后进入该公司独立的数据空间（各公司数据互不影响）。
+      </p>
+    </div>
+    <div class="cs-body">
+      {% if my_companies %}
+      <div class="company-cards">
+        {% for c in my_companies %}
+        <div class="card h-100 company-pick" style="border:1px solid #e5e7eb;cursor:pointer" onclick="pickCompany({{ c.id }}, this)">
+          <div class="card-body d-flex flex-column text-center">
+            <div class="cp-logo-box">
+              <img src="/company-logo/{{ c.id }}" class="cp-logo" alt=""
+                   onerror="this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='flex'">
+              <div class="cp-logo-fallback" style="display:none"><i class="bi bi-building"></i></div>
+            </div>
+            <div style="font-weight:600;font-size:15px">{{ c.name }}</div>
+            <div style="font-size:12px;color:#9ca3af;margin-bottom:8px">编码：{{ c.code }}</div>
+            {% if c.remark %}<div class="text-muted" style="font-size:12.5px;margin-bottom:10px">{{ c.remark }}</div>{% endif %}
+            <div class="mt-auto"><span class="text-primary" style="font-size:13px"><i class="bi bi-box-arrow-in-right"></i> 进入管理</span></div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% elif can_create_company %}
+      <div class="empty">
+        <i class="bi bi-building" style="font-size:40px;color:#cbd5e1"></i>
+        <p class="mt-2 mb-3">系统中还没有任何公司，请先创建第一个公司。</p>
+        <button class="btn btn-primary btn-sm" onclick="toggleCreateCompany(true)"><i class="bi bi-plus-lg"></i> 新建公司</button>
+      </div>
+      {% else %}
+      <div class="empty">
+        <i class="bi bi-exclamation-circle" style="font-size:40px;color:#f59e0b"></i>
+        <p class="mt-2">您暂未被分配任何公司权限，请联系管理员在「账号管理」中为您授权。</p>
+      </div>
+      {% endif %}
+
+      <!-- 新建公司内联表单（管理员，初始无公司时） -->
+      <div id="createCompanyWrap" style="display:none;margin-top:16px;border-top:1px solid #eef2f7;padding-top:16px">
+        <div class="mb-2">
+          <label class="modal-label">公司名称 <span class="text-danger">*</span></label>
+          <input class="form-control" id="ccName" placeholder="如：昆明韬达人力资源有限公司">
+        </div>
+        <div class="mb-2">
+          <label class="modal-label">公司编码</label>
+          <input class="form-control" id="ccCode" placeholder="留空则按名称自动生成（用于库文件名，唯一）">
+        </div>
+        <div class="mb-1">
+          <label class="modal-label">备注</label>
+          <input class="form-control" id="ccRemark" placeholder="选填">
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="btn btn-primary btn-sm" onclick="doCreateCompany()"><i class="bi bi-check-lg"></i> 创建并选择</button>
+          <button class="btn btn-secondary btn-sm" onclick="toggleCreateCompany(false)">取消</button>
+        </div>
+      </div>
+
+      {% if can_create_company and my_companies %}
+      <div class="text-center mt-3" id="addCompanyRow">
+        <a href="javascript:toggleCreateCompany(true)" class="btn btn-outline-secondary btn-sm"><i class="bi bi-plus-lg"></i> 新建公司</a>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+<script>
+function toggleCreateCompany(show){
+  const w = document.getElementById('createCompanyWrap');
+  if(w) w.style.display = show ? 'block' : 'none';
+  const row = document.getElementById('addCompanyRow');
+  if(row) row.style.display = show ? 'none' : 'block';
+}
+async function pickCompany(cid, el){
+  if(el) el.classList.add('loading');
+  const data = await api('/api/set-company', {method:'POST', body: JSON.stringify({company_id: cid})});
+  if(data){ location.href = '/'; }
+}
+async function doCreateCompany(){
+  const name = (document.getElementById('ccName')||{}).value || '';
+  if(!name.trim()){ showToast('请填写公司名称','error'); return; }
+  const data = await api('/api/company-create', {method:'POST', body: JSON.stringify({
+    name: name.trim(),
+    code: (document.getElementById('ccCode')||{}).value.trim(),
+    remark: (document.getElementById('ccRemark')||{}).value.trim()
+  })});
+  if(data && data.id){
+    showToast('公司创建成功','success');
+    // 创建后直接选定并进入
+    const ok = await api('/api/set-company', {method:'POST', body: JSON.stringify({company_id: data.id})});
+    if(ok){ location.href = '/'; }
+  }
+}
+</script>
+{% endif %}
+
+{% block scripts %}{% endblock %}
+{% else %}
+  <div style="display:flex;align-items:center;justify-content:center;height:100vh;flex-direction:column;background:#f4f6fa">
+    <h2 style="color:#ef4444">{% if error_404 %}404 页面不存在{% else %}403 权限不足{% endif %}</h2>
+    <a href="{{ url_for('dashboard') }}" class="btn btn-primary mt-3">返回首页</a>
+  </div>
+{% endif %}
+</body>
+</html>
