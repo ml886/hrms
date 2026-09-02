@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+{% block page_title %}劳动合同管理{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-file-earmark-text"></i> 劳动合同台账</h5>
+      <div>
+        <button class="btn btn-outline-primary btn-sm me-1" onclick="doExport()"><i class="bi bi-file-earmark-excel"></i> 导出</button>
+        {% if can_manage_module('employee') %}
+        <button class="btn btn-primary btn-sm" onclick="openModal()"><i class="bi bi-plus-lg"></i> 新增合同</button>
+        {% endif %}
+      </div>
+    </div>
+    <div class="filter-bar">
+      <input type="text" id="kw" placeholder="员工姓名/档案编号" style="min-width:200px">
+      <select id="fStatus"><option value="">全部状态</option><option>生效</option><option>到期</option><option>终止</option></select>
+      <select id="fExpiry">
+        <option value="">全部到期</option>
+        <option value="30">30天内到期</option>
+        <option value="7">7天内到期</option>
+        <option value="overdue">已过期</option>
+      </select>
+      <button class="btn btn-outline-primary btn-sm" onclick="loadList()">查询</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover">
+        <thead><tr><th>员工</th><th>客户单位</th><th>档案编号</th><th>类型</th><th>开始日</th><th>到期日</th><th>剩余天数</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">合同信息</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="mId">
+        <div class="mb-3"><label class="modal-label">关联员工</label><select id="mEmp" class="form-select"></select></div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">开始日期</label><input type="date" id="mStart" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">到期日期(空=无固定期限)</label><input type="date" id="mEnd" class="form-control"></div>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">合同类型</label>
+            <select id="mType" class="form-select"><option>固定期限</option><option>无固定期限</option><option>以完成一定工作任务为期限</option></select></div>
+          <div class="col-6 mb-3"><label class="modal-label">状态</label>
+            <select id="mStatus" class="form-select"><option>生效</option><option>到期</option><option>终止</option></select></div>
+        </div>
+        <div class="mb-3"><label class="modal-label">备注</label><input id="mRemark" class="form-control"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-primary" onclick="save()">保存</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let employees = [];
+const canEdit = {{ 'true' if can_manage_module('employee') else 'false' }};
+
+async function loadEmployees(){
+  const data = await api('/api/employees?status=在职');
+  if(data) employees = data.items;
+}
+async function loadList(){
+  const kw = document.getElementById('kw').value;
+  const st = document.getElementById('fStatus').value;
+  const ex = document.getElementById('fExpiry').value;
+  const q = new URLSearchParams({keyword:kw, status:st, expiry:ex});
+  const data = await api('/api/contracts?'+q);
+  if(!data) return;
+  const tb = document.getElementById('listBody');
+    if(data.items.length===0){ tb.innerHTML='<tr><td colspan="9" class="empty">暂无数据</td></tr>'; return; }
+  tb.innerHTML = data.items.map(c=>{
+    const days = c.days;
+    let d='';
+    if(c.end_date){
+      if(days<0) d=`<span class="level-red">已过期 ${-days}天</span>`;
+      else if(days<=7) d=`<span class="level-yellow">${days}天</span>`;
+      else d=`${days}天`;
+    } else d='<span style="color:#6b7280">无固定</span>';
+    let badge = c.status==='生效'?'badge-active':c.status==='到期'?'badge-expired':'badge-terminated';
+    const actions = canEdit ? `<button class="btn btn-outline-primary btn-sm me-1" onclick="edit(${c.id})">编辑</button>
+      <button class="btn btn-outline-danger btn-sm" onclick="del(${c.id})">删除</button>` : '<span style="color:#9ca3af">只读</span>';
+    return `<tr>
+      <td>${c.emp_name}</td><td>${c.department||'-'}</td><td>${c.contract_no||'-'}</td><td>${c.contract_type}</td>
+      <td>${c.start_date}</td><td>${c.end_date||'-'}</td><td>${d}</td>
+      <td><span class="badge-status ${badge}">${c.status}</span></td>
+      <td>${actions}</td></tr>`;
+  }).join('');
+}
+
+async function openModal(id){
+  if(!canEdit) return;
+  await loadEmployees();
+  const sel = document.getElementById('mEmp');
+  sel.innerHTML = employees.map(e=>`<option value="${e.id}">${e.name} - ${e.department||'未填'}</option>`).join('');
+  if(id){ await edit(id); }
+  else {
+    document.getElementById('mId').value='';
+    ['mStart','mEnd','mRemark'].forEach(i=>document.getElementById(i).value='');
+    document.getElementById('mType').value='固定期限';
+    document.getElementById('mStatus').value='生效';
+  }
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+async function edit(id){
+  const data = await api('/api/contracts?keyword=');
+  if(!data) return;
+  const c = data.items.find(x=>x.id===id);
+  if(!c) return;
+  document.getElementById('mId').value=c.id;
+  document.getElementById('mEmp').value=c.employee_id;
+  document.getElementById('mStart').value=c.start_date;
+  document.getElementById('mEnd').value=c.end_date;
+  document.getElementById('mType').value=c.contract_type;
+  document.getElementById('mStatus').value=c.status;
+  document.getElementById('mRemark').value=c.remark;
+}
+
+function save(){
+  confirmAction('确定保存该合同信息吗？', ()=>{ doSave(); });
+}
+async function doSave(){
+  const id = document.getElementById('mId').value;
+  const empId = parseInt(document.getElementById('mEmp').value);
+  const emp = employees.find(e=>e.id===empId);
+  const body = {
+    employee_id: empId,
+    contract_no: emp ? emp.archive_no : '',
+    start_date: document.getElementById('mStart').value,
+    end_date: document.getElementById('mEnd').value || null,
+    contract_type: document.getElementById('mType').value,
+    status: document.getElementById('mStatus').value,
+    remark: document.getElementById('mRemark').value,
+  };
+  if(id) await api('/api/contracts/'+id, {method:'PUT', body:body});
+  else await api('/api/contracts', {method:'POST', body:body});
+  bootstrap.Modal.getInstance(document.getElementById('modal')).hide();
+  loadList();
+}
+
+function del(id){
+  confirmAction('确认删除该合同吗？', async ()=>{ await doDel(id); }, true);
+}
+async function doDel(id){
+  const r = await api('/api/contracts/'+id, {method:'DELETE'});
+  if(r) { showToast('已删除','success'); loadList(); }
+}
+
+function doExport(){
+  const kw = document.getElementById('kw').value;
+  const st = document.getElementById('fStatus').value;
+  const ex = document.getElementById('fExpiry').value;
+  const q = new URLSearchParams({keyword:kw, status:st, expiry:ex});
+  location.href = '/api/contracts/export?'+q;
+}
+
+loadEmployees().then(loadList);
+</script>
+{% endblock %}

@@ -1,0 +1,242 @@
+{% extends 'base.html' %}
+{% block page_title %}系统设置{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <ul class="nav nav-tabs mb-3" id="setTabs" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabBase" type="button">基础设置</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCompany" type="button">公司管理</button></li>
+    </ul>
+
+    <div class="tab-content">
+      <!-- 基础设置：系统名称 / 登录页 Logo（仅用于登录页，与左上角公司展示无关） -->
+      <div class="tab-pane fade show active" id="tabBase">
+        <h5 style="margin:0 0 16px;font-weight:700"><i class="bi bi-sliders"></i> 基础设置</h5>
+        <div class="mb-3">
+          <label class="modal-label">系统名称</label>
+          <input id="sysTitle" class="form-control" maxlength="32" placeholder="人力资源管理系统" style="max-width:360px">
+          <div class="text-muted mt-1" style="font-size:12px">用于登录页标题、浏览器标题与页脚；左上角展示的是「当前公司」，与此设置相互独立。</div>
+        </div>
+        <div class="mb-3">
+          <label class="modal-label">系统 Logo（登录页）</label>
+          <div class="d-flex align-items-center gap-3 mb-2">
+            <img id="logoPrev" src="{{ logo_url }}" alt="logo"
+                 style="height:48px;width:48px;object-fit:contain;border-radius:10px;background:#fff;padding:4px;{% if not logo_url %}display:none{% endif %}">
+            <input type="file" id="logoFile" class="form-control" accept="image/*" style="max-width:320px">
+          </div>
+          <div class="text-muted" style="font-size:12px">支持 png / jpg / gif / svg / ico；不上传则使用默认图标。该 Logo 仅用于登录页。</div>
+        </div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-primary btn-sm" onclick="saveSettings()"><i class="bi bi-check-lg"></i> 保存</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="resetLogo()">恢复默认 Logo</button>
+        </div>
+      </div>
+
+      <!-- 公司管理：账套列表 + 新建/编辑（含公司 Logo） -->
+      <div class="tab-pane fade" id="tabCompany">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <div>
+            <h5 class="mb-0"><i class="bi bi-building-gear"></i> 公司（账套）管理</h5>
+            <small class="text-muted">每个公司拥有独立的数据库，框架一致、数据互不干扰。HR / 员工由各公司在「账号管理」中授权。</small>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="showCreate()"><i class="bi bi-plus-lg"></i> 新建公司</button>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-hover align-middle">
+            <thead>
+              <tr>
+                <th style="width:46px">#</th>
+                <th style="width:52px">Logo</th>
+                <th>公司名称</th>
+                <th>编码</th>
+                <th>关联账号</th>
+                <th>状态</th>
+                <th>备注</th>
+                <th style="width:160px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="cmpTbody">
+              {% for c in companies %}
+              <tr>
+                <td>{{ loop.index }}</td>
+                <td><img src="/company-logo/{{ c.id }}" alt="" style="height:28px;width:28px;object-fit:contain;border-radius:6px;background:#fff;padding:2px"></td>
+                <td style="font-weight:600">{{ c.name }}</td>
+                <td><code>{{ c.code }}</code></td>
+                <td>{{ stats.get(c.id, 0) }} 个</td>
+                <td>
+                  {% if c.enabled %}
+                  <span class="badge-status badge-active">启用</span>
+                  {% else %}
+                  <span class="badge-status badge-expired">停用</span>
+                  {% endif %}
+                </td>
+                <td class="text-muted" style="font-size:12.5px">{{ c.remark or '-' }}</td>
+                <td>
+                  <button class="btn btn-outline-secondary btn-sm" onclick="editCompany({{ c.id }}, {{ c.name|tojson }}, {{ c.enabled|tojson }}, {{ (c.remark or '')|tojson }}, {{ 'true' if c.logo else 'false' }})">
+                    <i class="bi bi-pencil"></i> 编辑</button>
+                  {% if c.enabled %}
+                  <button class="btn btn-outline-warning btn-sm" onclick="toggleCompany({{ c.id }}, false)">
+                    <i class="bi bi-pause-circle"></i> 停用</button>
+                  {% else %}
+                  <button class="btn btn-outline-success btn-sm" onclick="toggleCompany({{ c.id }}, true)">
+                    <i class="bi bi-play-circle"></i> 启用</button>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="8" class="empty">暂无公司，点击右上角「新建公司」</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建 / 编辑 公司弹窗 -->
+<div class="modal fade" id="cmpModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title" id="cmpModalTitle" style="font-size:14px;font-weight:700">新建公司</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="cmpId">
+        <div class="mb-2">
+          <label class="modal-label">公司名称 <span class="text-danger">*</span></label>
+          <input class="form-control" id="cmpName" placeholder="如：昆明韬达人力资源有限公司">
+        </div>
+        <div class="mb-2">
+          <label class="modal-label">公司编码</label>
+          <input class="form-control" id="cmpCode" placeholder="新建时留空按名称自动生成（唯一）">
+        </div>
+        <div class="mb-2">
+          <label class="modal-label">公司 Logo</label>
+          <div class="d-flex align-items-center gap-2 mb-1">
+            <img id="cmpLogoPrev" src="" alt="" style="height:40px;width:40px;object-fit:contain;border-radius:8px;background:#fff;padding:3px;display:none">
+            <span class="text-muted" style="font-size:12px">留空则使用内置默认图标</span>
+          </div>
+          <input type="file" id="cmpLogoFile" class="form-control" accept="image/*" style="max-width:320px">
+          <div class="d-flex gap-2 mt-1">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="uploadCmpLogo()">上传 Logo</button>
+            <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeCmpLogo()">移除</button>
+          </div>
+        </div>
+        <div class="mb-1">
+          <label class="modal-label">备注</label>
+          <input class="form-control" id="cmpRemark" placeholder="选填">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" id="cmpSaveBtn" onclick="saveCompany()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ---------- 基础设置 ----------
+async function load(){
+  const d = await api('/api/settings');
+  if(!d) return;
+  document.getElementById('sysTitle').value = d.sys_title || '';
+  const prev = document.getElementById('logoPrev');
+  if(d.logo){ prev.src = '/logo?' + Date.now(); prev.style.display = ''; }
+  else { prev.style.display = 'none'; }
+}
+async function saveSettings(){
+  const fd = new FormData();
+  const t = document.getElementById('sysTitle').value.trim();
+  if(t) fd.append('sys_title', t);
+  const f = document.getElementById('logoFile').files[0];
+  if(f) fd.append('logo', f);
+  const r = await fetch('/api/settings', {method:'POST', body: fd});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(d.error || '保存失败', 'error'); return; }
+  showToast('保存成功', 'success');
+  setTimeout(()=>location.reload(), 600);
+}
+async function resetLogo(){
+  const fd = new FormData();
+  fd.append('reset_logo', '1');
+  const r = await fetch('/api/settings', {method:'POST', body: fd});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(d.error || '操作失败', 'error'); return; }
+  showToast('已恢复默认 Logo', 'success');
+  setTimeout(()=>location.reload(), 600);
+}
+
+// ---------- 公司管理 ----------
+let cmpEditId = null;
+function showCreate(){
+  cmpEditId = null;
+  document.getElementById('cmpModalTitle').textContent='新建公司';
+  document.getElementById('cmpCode').value='';
+  document.getElementById('cmpCode').disabled=false;
+  document.getElementById('cmpName').value='';
+  document.getElementById('cmpRemark').value='';
+  document.getElementById('cmpLogoFile').value='';
+  document.getElementById('cmpLogoPrev').style.display='none';
+  new bootstrap.Modal(document.getElementById('cmpModal')).show();
+}
+function editCompany(id, name, enabled, remark, hasLogo){
+  cmpEditId = id;
+  document.getElementById('cmpModalTitle').textContent='编辑公司';
+  document.getElementById('cmpName').value=name;
+  document.getElementById('cmpRemark').value=remark;
+  document.getElementById('cmpCode').value='（不可修改）';
+  document.getElementById('cmpCode').disabled=true;
+  document.getElementById('cmpLogoFile').value='';
+  const prev = document.getElementById('cmpLogoPrev');
+  if(hasLogo){ prev.src = '/company-logo/'+id+'?'+Date.now(); prev.style.display=''; }
+  else { prev.style.display='none'; }
+  new bootstrap.Modal(document.getElementById('cmpModal')).show();
+}
+async function saveCompany(){
+  const id = cmpEditId;
+  const name = document.getElementById('cmpName').value.trim();
+  if(!name){ showToast('请填写公司名称','error'); return; }
+  if(id){
+    const data = await api('/api/company/'+id, {method:'PUT', body: JSON.stringify({
+      name, remark: document.getElementById('cmpRemark').value.trim()
+    })});
+    if(data){ showToast('已保存','success'); setTimeout(()=>location.reload(),700); }
+  } else {
+    const data = await api('/api/company-create', {method:'POST', body: JSON.stringify({
+      name, code: document.getElementById('cmpCode').value.trim(), remark: document.getElementById('cmpRemark').value.trim()
+    })});
+    if(data){ showToast('公司创建成功','success'); setTimeout(()=>location.reload(),700); }
+  }
+}
+async function toggleCompany(id, enabled){
+  const data = await api('/api/company/'+id, {method:'PUT', body: JSON.stringify({enabled})});
+  if(data){ showToast(enabled?'已启用':'已停用','success'); setTimeout(()=>location.reload(),700); }
+}
+async function uploadCmpLogo(){
+  if(!cmpEditId){ showToast('请先创建或编辑公司','error'); return; }
+  const f = document.getElementById('cmpLogoFile').files[0];
+  if(!f){ showToast('请选择图片文件','error'); return; }
+  const fd = new FormData(); fd.append('logo', f);
+  const r = await fetch('/api/company-logo/'+cmpEditId, {method:'POST', body: fd});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(d.error || '上传失败', 'error'); return; }
+  document.getElementById('cmpLogoPrev').src = '/company-logo/'+cmpEditId+'?'+Date.now();
+  document.getElementById('cmpLogoPrev').style.display='';
+  showToast('已上传公司 Logo','success');
+}
+async function removeCmpLogo(){
+  if(!cmpEditId){ showToast('请先创建或编辑公司','error'); return; }
+  const r = await fetch('/api/company-logo/'+cmpEditId, {method:'DELETE'});
+  const d = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(d.error || '操作失败', 'error'); return; }
+  document.getElementById('cmpLogoPrev').style.display='none';
+  showToast('已移除公司 Logo','success');
+}
+load();
+</script>
+{% endblock %}

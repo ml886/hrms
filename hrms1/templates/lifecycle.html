@@ -1,0 +1,1159 @@
+{% extends 'base.html' %}
+{% block page_title %}员工信息管理{% endblock %}
+{% block content %}
+<style>
+.archive-ticker-box{overflow:hidden;background:#eef2f7;border:1px solid #d6e0ef;border-radius:6px;margin-bottom:12px;padding:7px 0;position:relative}
+.archive-ticker{display:flex;width:max-content;animation:archiveTicker 90s linear infinite}
+.archive-ticker-content{flex:0 0 auto;padding-right:60px;font-size:13px;color:#374151;white-space:nowrap}
+.archive-ticker-content b{color:#2c5aa0}
+@keyframes archiveTicker{0%{transform:translateX(0)}100%{transform:translateX(-50%)}}
+</style>
+<div class="card">
+  <div class="card-body">
+    {% if dept_archives %}
+    <div class="archive-ticker-box">
+      <div class="archive-ticker">
+        <span class="archive-ticker-content">📋 客户单位档案编号播报：{% for d in dept_archives %}{{ d.department }} 最后档案编号 <b>{{ d.last_archive_no }}</b>　·　{% endfor %}</span>
+        <span class="archive-ticker-content">📋 客户单位档案编号播报：{% for d in dept_archives %}{{ d.department }} 最后档案编号 <b>{{ d.last_archive_no }}</b>　·　{% endfor %}</span>
+      </div>
+    </div>
+    {% endif %}
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-person-badge"></i> 员工信息台账</h5>
+      <div>
+        <button class="btn btn-outline-primary btn-sm me-1" onclick="doExport()"><i class="bi bi-file-earmark-excel"></i> 导出</button>
+        {% if can_manage_module('employee') %}
+        <button class="btn btn-outline-success btn-sm me-1" onclick="openImportModal()"><i class="bi bi-file-earmark-spreadsheet"></i> 模板导入</button>
+        <button class="btn btn-primary btn-sm me-1" onclick="openEmpModal()"><i class="bi bi-person-plus"></i> 入职登记</button>
+        {% endif %}
+      </div>
+    </div>
+    <div class="filter-bar">
+      <input type="text" id="kw" placeholder="姓名/身份证号" style="min-width:180px">
+      <select id="fStatus"><option value="">全部</option><option>在职</option><option>离职</option><option>退休</option></select>
+      <select id="fDept"><option value="">全部客户单位</option></select>
+      <button class="btn btn-outline-primary btn-sm" onclick="loadList()">查询</button>
+    </div>
+    <div id="periodTip" style="display:none;align-items:center;gap:8px;background:#eef2f7;border:1px solid #d6e0ef;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:13px">
+      <i class="bi bi-funnel-fill" style="color:#2c5aa0"></i>
+      <span id="periodTipText" style="color:#374151;font-weight:600"></span>
+      <button class="btn btn-sm btn-outline-secondary ms-auto" onclick="clearPeriod()">清除筛选</button>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover" id="empTable">
+        <thead><tr>
+          <th style="width:56px;text-align:center">序号</th>
+          <th class="sortable" data-key="name" onclick="sortBy('name')">姓名<span class="sort-icon" data-k="name"></span></th>
+          <th class="sortable" data-key="archive_no" onclick="sortBy('archive_no')">档案编号<span class="sort-icon" data-k="archive_no"></span></th>
+          <th class="sortable" data-key="id_card" onclick="sortBy('id_card')">身份证号<span class="sort-icon" data-k="id_card"></span></th>
+          <th class="sortable" data-key="department" onclick="sortBy('department')">客户单位<span class="sort-icon" data-k="department"></span></th>
+          <th class="sortable" data-key="position" onclick="sortBy('position')">职位<span class="sort-icon" data-k="position"></span></th>
+          <th class="sortable" data-key="hire_date" onclick="sortBy('hire_date')">入职日期<span class="sort-icon" data-k="hire_date"></span></th>
+          <th class="sortable" data-key="status" onclick="sortBy('status')">状态<span class="sort-icon" data-k="status"></span></th>
+          <th class="sortable" data-key="leave_date" onclick="sortBy('leave_date')">离职日期<span class="sort-icon" data-k="leave_date"></span></th>
+          <th>合同信息</th><th>操作</th>
+        </tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+    <div id="pager" class="d-flex justify-content-between align-items-center flex-wrap" style="gap:10px;margin-top:12px"></div>
+  </div>
+</div>
+
+<div class="modal fade" id="empModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title" id="empTitle">员工信息</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="mId">
+        <!-- 个人证件照上传 -->
+        <h6 class="text-primary" style="border-bottom:2px solid #2c5aa0;padding-bottom:6px;margin-bottom:14px;font-size:15px;font-weight:700">个人证件照</h6>
+        <div class="d-flex align-items-center" style="gap:16px">
+          <div id="mPhotoWrap" style="width:120px;height:150px;border:1px dashed #cbd5e1;border-radius:8px;overflow:hidden;background:#f8fafc;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+            <img id="mPhotoImg" src="" alt="证件照" style="width:100%;height:100%;object-fit:cover;display:none">
+            <span id="mPhotoPlaceholder" style="color:#9ca3af;font-size:13px;text-align:center;padding:8px">暂无证件照</span>
+          </div>
+          <div>
+            <button class="btn btn-outline-primary btn-sm" onclick="document.getElementById('mPhotoFile').click()"><i class="bi bi-camera"></i> 上传证件照</button>
+            <div class="text-muted mt-1" style="font-size:12px">支持 png / jpg / jpeg / gif / bmp / webp，上传后即时显示</div>
+            <input type="file" id="mPhotoFile" accept="image/*" style="display:none">
+          </div>
+        </div>
+
+        <h6 class="text-primary" style="border-bottom:2px solid #2c5aa0;padding-bottom:6px;margin-bottom:14px;font-size:15px;font-weight:700">基本信息</h6>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">姓名</label><input id="mName" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">性别</label><select id="mGender" class="form-select"><option value="">-</option><option>男</option><option>女</option></select></div>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">身份证号</label><input id="mIdCard" class="form-control" oninput="onIdCardInput()"></div>
+          <div class="col-6 mb-3"><label class="modal-label">出生日期</label><input type="date" id="mBirthday" class="form-control"></div>
+        </div>
+        <div class="row">
+          <div class="col-4 mb-3"><label class="modal-label">客户单位</label><select id="mDept" class="form-select"><option value="">请选择</option></select></div>
+          <div class="col-4 mb-3"><label class="modal-label">职位</label><input id="mPos" class="form-control" list="posList" placeholder="填写或选择职位"></div>
+          <div class="col-4 mb-3"><label class="modal-label">入职日期</label><input type="date" id="mHire" class="form-control"></div>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">电话</label><input id="mPhone" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">住址</label><input id="mAddr" class="form-control"></div>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">邮箱</label><input id="mEmail" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">档案编号</label><input id="mArchiveNo" class="form-control" placeholder="如 DF-KG-317"></div>
+        </div>
+        <datalist id="deptList"></datalist>
+        <datalist id="posList"></datalist>
+
+        <h6 class="text-primary" style="border-bottom:2px solid #2c5aa0;padding-bottom:6px;margin-bottom:14px;font-size:15px;font-weight:700">个人详细信息</h6>
+        <div class="row">
+          <div class="col-4 mb-3"><label class="modal-label">籍贯</label><input id="mNative" class="form-control"></div>
+          <div class="col-4 mb-3"><label class="modal-label">民族</label><select id="mEthnicity" class="form-select"><option value="">请选择</option></select></div>
+          <div class="col-4 mb-3"><label class="modal-label">婚姻状况</label>
+            <select id="mMarital" class="form-select"><option value="">请选择</option></select></div>
+        </div>
+        <div class="row">
+          <div class="col-4 mb-3"><label class="modal-label">学历</label>
+            <select id="mEducation" class="form-select"><option value="">请选择</option></select></div>
+          <div class="col-4 mb-3"><label class="modal-label">毕业院校</label><input id="mSchool" class="form-control"></div>
+          <div class="col-4 mb-3"><label class="modal-label">政治面貌</label>
+            <select id="mPolitical" class="form-select"><option value="">请选择</option></select></div>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">紧急联系人</label><input id="mEContact" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">紧急联系电话</label><input id="mEPhone" class="form-control"></div>
+        </div>
+
+        <!-- 参保信息板块 -->
+        <h6 class="text-primary" style="border-bottom:2px solid #2c5aa0;padding-bottom:6px;margin-bottom:14px;font-size:15px;font-weight:700">参保信息</h6>
+        <div class="alert alert-info py-2" style="font-size:12px">
+          <i class="bi bi-info-circle"></i> 参保时间与个人编号在首次导入社保明细时自动关联，之后导入不再覆盖；如需调整可在此手动修改。
+        </div>
+        <div id="mInsuranceInfo">
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px;font-size:13px;font-weight:600;color:#374151">
+            <div style="flex:0 0 90px">险种</div>
+            <div style="flex:1 1 40%;max-width:200px">参保时间</div>
+            <div style="flex:1 1 40%">个人编号</div>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <div style="flex:0 0 90px;font-size:13px;color:#374151">养老保险</div>
+            <input type="date" id="mPensionDate" class="form-control form-control-sm" style="flex:1 1 40%;max-width:200px">
+            <input id="mPensionNo" class="form-control form-control-sm" style="flex:1 1 40%" placeholder="个人编号">
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <div style="flex:0 0 90px;font-size:13px;color:#374151">工伤保险</div>
+            <input type="date" id="mInjuryDate" class="form-control form-control-sm" style="flex:1 1 40%;max-width:200px">
+            <input id="mInjuryNo" class="form-control form-control-sm" style="flex:1 1 40%" placeholder="个人编号">
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <div style="flex:0 0 90px;font-size:13px;color:#374151">医疗保险</div>
+            <input type="date" id="mMedicalDate" class="form-control form-control-sm" style="flex:1 1 40%;max-width:200px">
+            <input id="mMedicalNo" class="form-control form-control-sm" style="flex:1 1 40%" placeholder="个人编号">
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <div style="flex:0 0 90px;font-size:13px;color:#374151">生育保险</div>
+            <input type="date" id="mMaternityDate" class="form-control form-control-sm" style="flex:1 1 40%;max-width:200px">
+            <input id="mMaternityNo" class="form-control form-control-sm" style="flex:1 1 40%" placeholder="个人编号">
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <div style="flex:0 0 90px;font-size:13px;color:#374151">失业保险</div>
+            <input type="date" id="mUnemploymentDate" class="form-control form-control-sm" style="flex:1 1 40%;max-width:200px">
+            <input id="mUnemploymentNo" class="form-control form-control-sm" style="flex:1 1 40%" placeholder="个人编号">
+          </div>
+          <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px">
+            <div style="flex:0 0 90px;font-size:13px;color:#374151">住房公积金</div>
+            <input type="date" id="mFundDate" class="form-control form-control-sm" style="flex:1 1 40%;max-width:200px">
+            <input id="mFundNo" class="form-control form-control-sm" style="flex:1 1 40%" placeholder="个人编号">
+          </div>
+        </div>
+
+        <!-- 合同管理区 -->
+        <div class="d-flex justify-content-between align-items-center" style="border-bottom:2px solid #2c5aa0;padding-bottom:6px;margin-bottom:14px">
+          <span class="text-primary" style="font-size:15px;font-weight:700">合同管理</span>
+          {% if can_manage_module('employee') %}<button class="btn btn-outline-primary btn-sm" onclick="openEmpContract()"><i class="bi bi-plus-lg"></i> 新增合同</button>{% endif %}
+        </div>
+        <div id="mContracts" style="max-height:300px;overflow-y:auto">
+          <div style="color:#9ca3af;text-align:center;padding:12px">暂无合同，点击右上角"新增合同"添加</div>
+        </div>
+
+        <!-- 附件管理区 -->
+        <div class="d-flex justify-content-between align-items-center" style="border-bottom:2px solid #2c5aa0;padding-bottom:6px;margin:18px 0 14px">
+          <span class="text-primary" style="font-size:15px;font-weight:700">附件管理</span>
+          {% if can_manage_module('employee') %}<button class="btn btn-outline-primary btn-sm" onclick="openAttachUpload()"><i class="bi bi-upload"></i> 上传附件</button>{% endif %}
+        </div>
+        <div id="mAttachments" style="max-height:200px;overflow-y:auto">
+          <div style="color:#9ca3af;text-align:center;padding:12px">暂无附件，点击右上角"上传附件"添加</div>
+        </div>
+        <!-- 上传附件隐藏表单 -->
+        <input type="file" id="mAttachFile" style="display:none">
+      </div>
+      <div class="modal-footer">
+        {% if is_admin %}<button class="btn btn-danger" onclick="deleteEmployee(currentEmpId, currentEmpName)">删除员工</button>{% endif %}
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="saveEmp()">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="resignModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title" id="rTitle">状态变更登记</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="rId">
+        <input type="hidden" id="rType" value="离职">
+        <p>员工: <b id="rName"></b></p>
+        <div class="mb-3"><label class="modal-label" id="rDateLabel">离职日期</label><input type="date" id="rDate" class="form-control"></div>
+        <div class="mb-3"><label class="modal-label">备注</label><textarea id="rRemark" class="form-control" rows="2" placeholder="原因/说明等"></textarea></div>
+        <div class="alert alert-info" id="rTip">登记后将自动终止其生效合同</div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-danger" id="rConfirmBtn" onclick="saveResign()">确认登记</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="transferModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">转岗 / 调动</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="tId">
+        <p>员工: <b id="tName"></b></p>
+        <div class="mb-3"><label class="modal-label">转岗日期</label><input type="date" id="tDate" class="form-control"></div>
+        <div class="mb-3"><label class="modal-label">新客户单位</label><input id="tDept" class="form-control" list="deptList" placeholder="填写新客户单位"></div>
+        <div class="mb-3"><label class="modal-label">新职位</label><input id="tPos" class="form-control" placeholder="填写新职位"></div>
+        <div class="mb-3"><label class="modal-label">转岗备注</label><textarea id="tRemark" class="form-control" rows="2" placeholder="转岗原因/说明等"></textarea></div>
+        <div class="alert alert-info">转岗后员工的客户单位、职位信息将更新，并记录转岗历史，适用于转岗、跨客户单位调动等在职变动场景。</div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-success" onclick="saveTransfer()">确认转岗</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- 员工信息详情浮框 -->
+<div class="modal fade" id="detailModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-person-lines-fill"></i> 员工信息详情</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body" id="detailBody"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 批量导入弹窗 -->
+<div class="modal fade" id="importModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h6 class="modal-title"><i class="bi bi-file-earmark-spreadsheet"></i> 批量导入员工</h6>
+        <button class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div style="background:#f0f7ff;border:1px solid #d6e0ef;border-radius:8px;padding:14px;margin-bottom:16px">
+          <div style="font-weight:600;color:#2c5aa0;margin-bottom:8px"><i class="bi bi-info-circle"></i> 导入说明</div>
+          <ul style="margin:0;padding-left:18px;font-size:13px;color:#374151;line-height:1.8">
+            <li>请先下载模板，按模板格式填写员工信息</li>
+            <li><b>姓名</b>和<b>身份证号</b>为必填项，其余为选填</li>
+            <li>身份证号已存在的员工将自动跳过，不覆盖原有信息</li>
+            <li>导入后员工状态默认为"在职"</li>
+          </ul>
+        </div>
+        <div class="d-flex gap-2 mb-3">
+          <a href="/api/employees/template" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> 下载导入模板</a>
+        </div>
+        <div style="border:2px dashed #cbd5e1;border-radius:8px;padding:24px;text-align:center;cursor:pointer" onclick="document.getElementById('importFile').click()">
+          <i class="bi bi-cloud-upload" style="font-size:32px;color:#9ca3af"></i>
+          <div style="margin-top:8px;color:#6b7280;font-size:13px">点击选择 Excel/CSV 文件上传</div>
+          <div id="importFileName" style="margin-top:6px;font-weight:600;color:#2c5aa0;font-size:13px"></div>
+        </div>
+        <input type="file" id="importFile" accept=".xlsx,.xls,.csv" style="display:none">
+        <div id="importResult" class="mt-3"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary" onclick="doImport(event)"><i class="bi bi-upload"></i> 开始导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 合同编辑弹窗 -->
+{% endblock %}
+
+{% block scripts %}
+<script>
+const canEdit = {{ 'true' if can_manage_module('employee') else 'false' }};
+const isAdmin = {{ 'true' if is_admin else 'false' }};   // 仅管理员可修改合同起止时间
+
+// 排序状态：默认在职在前，按入职日期降序
+let sortKey = 'hire_date';
+let sortDir = 'desc';
+let allEmployees = [];
+// 分页状态：默认每页 10 条，当前第 1 页
+let currentPage = 1;
+let pageSize = 10;
+
+function sortBy(key){
+  if(sortKey === key){ sortDir = sortDir==='asc'?'desc':'asc'; }
+  else { sortKey = key; sortDir = (key==='hire_date'||key==='leave_date')?'desc':'asc'; }
+  document.querySelectorAll('#empTable th.sortable').forEach(th=>{
+    th.classList.remove('asc','desc');
+    if(th.dataset.key===key) th.classList.add(sortDir);
+  });
+  currentPage = 1;   // 排序后回到第一页
+  renderList();
+}
+
+async function loadDicts(){
+  // 从代码字段维护加载字典选项
+  const cats = ['客户单位','职位','民族','婚姻状况','学历','政治面貌'];
+  const all = await api('/api/dicts?');
+  if(!all) return;
+  const byCat = {};
+  cats.forEach(c=>byCat[c]=[]);
+  all.items.forEach(d=>{ if(byCat[d.category]) byCat[d.category].push(d.label); });
+
+  // 客户单位下拉
+  const dept = document.getElementById('mDept');
+  const curDept = dept.value;
+  dept.innerHTML = '<option value="">请选择</option>' + byCat['客户单位'].map(v=>`<option value="${v}">${v}</option>`).join('');
+  if(curDept) dept.value = curDept;
+
+  // 客户单位 datalist（用于转岗输入框补全）
+  document.getElementById('deptList').innerHTML = byCat['客户单位'].map(v=>`<option value="${v}">`).join('');
+  // 职位 datalist
+  document.getElementById('posList').innerHTML = byCat['职位'].map(v=>`<option value="${v}">`).join('');
+
+  // 民族
+  const eth = document.getElementById('mEthnicity');
+  eth.innerHTML = '<option value="">请选择</option>' + byCat['民族'].map(v=>`<option value="${v}">${v}</option>`).join('');
+  // 婚姻
+  const mar = document.getElementById('mMarital');
+  mar.innerHTML = '<option value="">请选择</option>' + byCat['婚姻状况'].map(v=>`<option value="${v}">${v}</option>`).join('');
+  // 学历
+  const edu = document.getElementById('mEducation');
+  edu.innerHTML = '<option value="">请选择</option>' + byCat['学历'].map(v=>`<option value="${v}">${v}</option>`).join('');
+  // 政治面貌
+  const pol = document.getElementById('mPolitical');
+  pol.innerHTML = '<option value="">请选择</option>' + byCat['政治面貌'].map(v=>`<option value="${v}">${v}</option>`).join('');
+}
+function doExport(){
+  const kw = document.getElementById('kw').value;
+  const st = document.getElementById('fStatus').value;
+  const dept = document.getElementById('fDept').value;
+  const period = new URLSearchParams(location.search).get('period') || '';
+  const q = new URLSearchParams({keyword:kw, status:st, department:dept, period});
+  location.href = '/api/employees/export?'+q;
+}
+
+async function loadList(){
+  const kw = document.getElementById('kw').value;
+  const st = document.getElementById('fStatus').value;
+  const dept = document.getElementById('fDept').value;
+  // 从 URL 读取 period（本月入职/离职）
+  const period = new URLSearchParams(location.search).get('period') || '';
+  // 重新加载客户单位
+  const dd = await api('/api/employees/departments');
+  if(dd){
+    const sel = document.getElementById('fDept');
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">全部客户单位</option>' + dd.items.map(d=>`<option value="${d}">${d}</option>`).join('');
+    sel.value = cur;
+  }
+  const q = new URLSearchParams({keyword:kw, status:st, department:dept, period});
+  const data = await api('/api/employees?'+q);
+  if(!data) return;
+  allEmployees = data.items;
+  currentPage = 1;   // 查询后回到第一页
+  renderList();
+}
+
+function renderList(){
+  const tb = document.getElementById('listBody');
+  const pager = document.getElementById('pager');
+  if(allEmployees.length===0){
+    tb.innerHTML='<tr><td colspan="11" class="empty">暂无员工</td></tr>';
+    if(pager) pager.innerHTML='';
+    return;
+  }
+  // 排序：在职在前，然后按选择字段排序
+  const rows = allEmployees.slice().sort((a,b)=>{
+    const ar = a.status==='在职'?0:1;
+    const br = b.status==='在职'?0:1;
+    if(ar !== br) return ar - br;
+    let av = a[sortKey], bv = b[sortKey];
+    if(!av) av=''; if(!bv) bv='';
+    const cmp = String(av).localeCompare(String(bv), 'zh');
+    return sortDir==='asc' ? cmp : -cmp;
+  });
+  // 分页：计算总页数并校正当前页
+  const total = rows.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  if(currentPage > totalPages) currentPage = totalPages;
+  if(currentPage < 1) currentPage = 1;
+  const start = (currentPage - 1) * pageSize;
+  const pageRows = rows.slice(start, start + pageSize);
+  tb.innerHTML = pageRows.map((e, i)=>{
+    const seq = start + i + 1;   // 全局连续序号
+    let badge = e.status==='在职'?'badge-in-service':(e.status==='退休'?'badge-retired':'badge-resigned');
+    let actions = '';
+    if(canEdit){
+      actions = `<button class="btn btn-outline-primary btn-sm me-1" onclick="editEmp(${e.id})">编辑</button>`;
+      if(e.status==='在职'){
+        actions += `<button class="btn btn-outline-success btn-sm me-1" onclick="openTransfer(${e.id},'${encodeURIComponent(e.name)}')">转岗</button>`;
+        actions += `<button class="btn btn-outline-danger btn-sm me-1" onclick="openResign(${e.id},'${encodeURIComponent(e.name)}','离职')">离职</button>`;
+        actions += `<button class="btn btn-outline-warning btn-sm" onclick="openResign(${e.id},'${encodeURIComponent(e.name)}','退休')">退休</button>`;
+      }
+    } else actions = '<span style="color:#9ca3af">只读</span>';
+    // 删除员工：仅管理员有权限（按钮右移一点，与操作类按钮区分）
+    if(isAdmin){
+      actions += `<button class="btn btn-danger btn-sm" style="margin-left:10px" onclick="deleteEmployee(${e.id},'${encodeURIComponent(e.name)}')">删除</button>`;
+    }
+    // 合同信息
+    let cinfo = '<span style="color:#9ca3af">无合同</span>';
+    if(e.contract_info){
+      const c = e.contract_info;
+      const days = c.days;
+      let expiry = '';
+      if(c.status==='生效' && c.end_date){
+        if(days<0) expiry = ' <span class="level-red">已过期</span>';
+        else if(days<=30) expiry = ' <span class="level-yellow">将到期</span>';
+      }
+      const cbadge = c.status==='生效'?'badge-active':c.status==='终止'?'badge-terminated':'badge-expired';
+      cinfo = `<div style="font-size:13px;line-height:1.7">
+        <div><span class="badge-status ${cbadge}">${c.status}</span> ${c.contract_type||''}</div>
+        <div>${c.start_date} ~ ${c.end_date||'无固定期限'}${expiry}</div>
+        ${c.renew_count?`<div style="color:#6b7280">续签${c.renew_count}次</div>`:''}</div>`;
+    }
+    // 姓名可点击打开详情
+    return `<tr>
+      <td style="text-align:center;color:#6b7280">${seq}</td>
+      <td><span class="emp-name" onclick="showDetail(${e.id})">${e.name}</span></td>
+      <td>${e.archive_no||'-'}</td><td>${e.id_card}</td><td>${e.department||'-'}</td><td>${e.position||'-'}</td>
+      <td>${e.hire_date}</td><td><span class="badge-status ${badge}">${e.status}</span></td>
+      <td>${e.leave_date||'-'}</td><td>${cinfo}</td><td>${actions}</td></tr>`;
+  }).join('');
+  renderPager(total, totalPages);
+}
+
+// ===== 分页控件：总数统计、首页/上一页/下一页/末页、跳转、每页条数 =====
+function renderPager(total, totalPages){
+  const pager = document.getElementById('pager');
+  if(!pager) return;
+  const sizeOpts = [10,20,50,100].map(v=>`<option value="${v}" ${v===pageSize?'selected':''}>${v} 条/页</option>`).join('');
+  pager.innerHTML = `
+    <div style="font-size:13px;color:#6b7280">
+      共 <b style="color:#374151">${total}</b> 条记录，第 <b style="color:#374151">${currentPage}</b>/<b style="color:#374151">${totalPages}</b> 页
+    </div>
+    <div class="d-flex align-items-center" style="gap:6px;flex-wrap:wrap">
+      <button class="btn btn-sm btn-outline-secondary" onclick="gotoPage(1)" ${currentPage===1?'disabled':''}>首页</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="gotoPage(currentPage-1)" ${currentPage===1?'disabled':''}>上一页</button>
+      <span style="font-size:13px;color:#6b7280">跳至</span>
+      <input type="number" id="pageJump" min="1" max="${totalPages}" value="${currentPage}"
+             style="width:64px;padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:13px"
+             onkeydown="if(event.key==='Enter') jumpToPage()">
+      <span style="font-size:13px;color:#6b7280">页</span>
+      <button class="btn btn-sm btn-outline-secondary" onclick="jumpToPage()">跳转</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="gotoPage(currentPage+1)" ${currentPage===totalPages?'disabled':''}>下一页</button>
+      <button class="btn btn-sm btn-outline-secondary" onclick="gotoPage(${totalPages})" ${currentPage===totalPages?'disabled':''}>末页</button>
+      <select id="pageSizeSel" onchange="changePageSize(this.value)"
+              style="padding:3px 6px;border:1px solid #d1d5db;border-radius:4px;font-size:13px">${sizeOpts}</select>
+    </div>`;
+}
+
+function gotoPage(p){
+  const totalPages = Math.max(1, Math.ceil(allEmployees.length / pageSize));
+  if(p < 1) p = 1;
+  if(p > totalPages) p = totalPages;
+  currentPage = p;
+  renderList();
+}
+
+function jumpToPage(){
+  const el = document.getElementById('pageJump');
+  if(!el) return;
+  const v = parseInt(el.value, 10);
+  if(!v || isNaN(v)) return;
+  gotoPage(v);
+}
+
+function changePageSize(v){
+  pageSize = parseInt(v, 10) || 20;
+  currentPage = 1;
+  renderList();
+}
+
+function openEmpModal(){
+  if(!canEdit) return;
+  ['mId','mName','mIdCard','mPhone','mDept','mPos','mAddr','mBirthday',
+   'mEmail','mNative','mEthnicity','mSchool','mEContact','mEPhone','mArchiveNo'].forEach(i=>document.getElementById(i).value='');
+  ['mGender','mMarital','mEducation','mPolitical'].forEach(i=>document.getElementById(i).value='');
+  // 清空参保信息
+  ['mPensionDate','mPensionNo','mInjuryDate','mInjuryNo','mMedicalDate','mMedicalNo',
+   'mUnemploymentDate','mUnemploymentNo','mFundDate','mFundNo'].forEach(i=>document.getElementById(i).value='');
+  // 清空证件照
+  document.getElementById('mPhotoImg').style.display='none';
+  document.getElementById('mPhotoImg').src='';
+  document.getElementById('mPhotoPlaceholder').style.display='block';
+  document.getElementById('mHire').value = localDateStr(new Date());
+  document.getElementById('empTitle').textContent='入职登记';
+  currentEmpId = null;
+  document.getElementById('mContracts').innerHTML = '<div style="color:#9ca3af;text-align:center;padding:12px">保存员工后可在此添加合同</div>';
+  document.getElementById('mAttachments').innerHTML = '<div style="color:#9ca3af;text-align:center;padding:12px">保存员工后可在此上传附件</div>';
+  new bootstrap.Modal(document.getElementById('empModal')).show();
+}
+
+function onIdCardInput(){
+  const v = (document.getElementById('mIdCard').value||'').trim();
+  if(!/^\d{17}[\dXx]$/.test(v)) return;   // 仅处理 18 位有效身份证
+  const y = v.slice(6,10), m = v.slice(10,12), d = v.slice(12,14);
+  const dt = new Date(+y, parseInt(m,10)-1, parseInt(d,10));
+  if(dt.getFullYear()===+y && dt.getMonth()===parseInt(m,10)-1 && dt.getDate()===+d){
+    document.getElementById('mBirthday').value = `${y}-${m}-${d}`;
+  }
+  const genderCode = parseInt(v.charAt(16), 10);
+  document.getElementById('mGender').value = (genderCode % 2 === 1) ? '男' : '女';
+}
+
+async function editEmp(id){
+  if(!canEdit) return;
+  const data = await api('/api/employees?keyword=');
+  if(!data) return;
+  const e = data.items.find(x=>x.id===id);
+  if(!e) return;
+  document.getElementById('mId').value=e.id;
+  document.getElementById('mName').value=e.name;
+  document.getElementById('mIdCard').value=e.id_card;
+  document.getElementById('mPhone').value=e.phone;
+  document.getElementById('mDept').value=e.department;
+  document.getElementById('mPos').value=e.position;
+  document.getElementById('mHire').value=e.hire_date;
+  document.getElementById('mArchiveNo').value=e.archive_no||'';
+  document.getElementById('mGender').value=e.gender;
+  document.getElementById('mBirthday').value=e.birthday;
+  document.getElementById('mAddr').value=e.address;
+  document.getElementById('mEmail').value=e.email;
+  document.getElementById('mNative').value=e.native_place;
+  document.getElementById('mEthnicity').value=e.ethnicity;
+  document.getElementById('mMarital').value=e.marital_status;
+  document.getElementById('mEducation').value=e.education;
+  document.getElementById('mSchool').value=e.school;
+  document.getElementById('mPolitical').value=e.political_status;
+  document.getElementById('mEContact').value=e.emergency_contact;
+  document.getElementById('mEPhone').value=e.emergency_phone;
+  // 参保信息
+  document.getElementById('mPensionDate').value=e.pension_enroll_date;
+  document.getElementById('mPensionNo').value=e.pension_person_no;
+  document.getElementById('mInjuryDate').value=e.injury_enroll_date;
+  document.getElementById('mInjuryNo').value=e.injury_person_no;
+    document.getElementById('mMedicalDate').value=e.medical_enroll_date;
+    document.getElementById('mMedicalNo').value=e.medical_person_no;
+    document.getElementById('mMaternityDate').value=e.maternity_enroll_date;
+    document.getElementById('mMaternityNo').value=e.maternity_person_no;
+  document.getElementById('mUnemploymentDate').value=e.unemployment_enroll_date;
+  document.getElementById('mUnemploymentNo').value=e.unemployment_person_no;
+  document.getElementById('mFundDate').value=e.fund_enroll_date;
+  document.getElementById('mFundNo').value=e.fund_person_no;
+  // 证件照
+  if(e.photo){
+    document.getElementById('mPhotoImg').src = '/api/employees/'+e.id+'/photo?t='+Date.now();
+    document.getElementById('mPhotoImg').style.display='block';
+    document.getElementById('mPhotoPlaceholder').style.display='none';
+  } else {
+    document.getElementById('mPhotoImg').style.display='none';
+    document.getElementById('mPhotoImg').src='';
+    document.getElementById('mPhotoPlaceholder').style.display='block';
+  }
+  document.getElementById('empTitle').textContent='编辑员工';
+  currentEmpId = e.id;
+  currentEmpName = e.name;
+  loadEmpContracts(e.id);
+  loadEmpAttachments(e.id);
+  new bootstrap.Modal(document.getElementById('empModal')).show();
+}
+
+function saveEmp(){
+  confirmAction('确定保存该员工信息及合同数据吗？', ()=>{ doSaveEmp(); });
+}
+
+async function doSaveEmp(){
+  const id = document.getElementById('mId').value;
+  const body = {
+    name: document.getElementById('mName').value,
+    id_card: document.getElementById('mIdCard').value,
+    phone: document.getElementById('mPhone').value,
+    department: document.getElementById('mDept').value,
+    position: document.getElementById('mPos').value,
+    hire_date: document.getElementById('mHire').value,
+    gender: document.getElementById('mGender').value,
+    birthday: document.getElementById('mBirthday').value,
+    address: document.getElementById('mAddr').value,
+    email: document.getElementById('mEmail').value,
+    native_place: document.getElementById('mNative').value,
+    ethnicity: document.getElementById('mEthnicity').value,
+    marital_status: document.getElementById('mMarital').value,
+    education: document.getElementById('mEducation').value,
+    school: document.getElementById('mSchool').value,
+    political_status: document.getElementById('mPolitical').value,
+    archive_no: document.getElementById('mArchiveNo').value.trim(),
+    emergency_contact: document.getElementById('mEContact').value,
+    emergency_phone: document.getElementById('mEPhone').value,
+    // 参保信息
+    pension_enroll_date: document.getElementById('mPensionDate').value,
+    pension_person_no: document.getElementById('mPensionNo').value,
+    injury_enroll_date: document.getElementById('mInjuryDate').value,
+    injury_person_no: document.getElementById('mInjuryNo').value,
+    medical_enroll_date: document.getElementById('mMedicalDate').value,
+    medical_person_no: document.getElementById('mMedicalNo').value,
+    maternity_enroll_date: document.getElementById('mMaternityDate').value,
+    maternity_person_no: document.getElementById('mMaternityNo').value,
+    unemployment_enroll_date: document.getElementById('mUnemploymentDate').value,
+    unemployment_person_no: document.getElementById('mUnemploymentNo').value,
+    fund_enroll_date: document.getElementById('mFundDate').value,
+    fund_person_no: document.getElementById('mFundNo').value,
+  };
+  let r;
+  if(id) r = await api('/api/employees/'+id, {method:'PUT', body});
+  else r = await api('/api/employees', {method:'POST', body});
+  if(!r){ showToast('保存失败','error'); return; }
+  // 保存成功后，若为新增则更新 currentEmpId 以便继续添加合同/附件
+  let empId = r.id || Number(id);
+  if(!id && r.id){
+    currentEmpId = r.id;
+    currentEmpName = document.getElementById('mName').value;
+    document.getElementById('mId').value = r.id;
+    document.getElementById('empTitle').textContent='编辑员工';
+  }
+  // 批量保存合同：遍历合同区所有合同行（档案编号自动取员工基本信息）
+  await saveAllContracts(empId);
+  showToast('员工信息已保存','success');
+  bootstrap.Modal.getInstance(document.getElementById('empModal')).hide();
+  loadList();
+  refreshTicker();
+}
+
+// 删除员工：仅管理员可调用（后端 api/employees/<id> DELETE 已限定 admin 角色）
+function deleteEmployee(id, name){
+  name = decodeURIComponent(name || '');
+  if(!id){ showToast('请先选择员工','error'); return; }
+  confirmAction('确定删除该员工'+(name?('「'+name+'」'):'')+'及其全部合同/社保/附件/转岗记录吗？此操作不可恢复！', async ()=>{
+    const r = await api('/api/employees/'+id, {method:'DELETE'});
+    if(r){
+      showToast('员工已删除','success');
+      const inst = bootstrap.Modal.getInstance(document.getElementById('empModal'));
+      if(inst) inst.hide();
+      loadList();
+    }
+  }, true);
+}
+
+// 刷新顶部滚动播报：重新拉取各客户单位最后档案编号
+async function refreshTicker(){
+  const data = await api('/api/dept-archives');
+  if(!data || !data.dept_archives) return;
+  let html = '📋 客户单位档案编号播报：';
+  if(data.dept_archives.length === 0){
+    html += '暂无档案编号数据';
+  } else {
+    html += data.dept_archives.map(d=>`${d.department} 最后档案编号 <b>${d.last_archive_no}</b>　·　`).join('');
+  }
+  document.querySelectorAll('.archive-ticker-content').forEach(el=>{ el.innerHTML = html; });
+}
+
+// 收集合同区所有合同行并批量保存
+async function saveAllContracts(empId){
+  // 注意：合同类型控件是 <select id="ccType_...">，不是 <input>，故选择器不能限定 input
+  const rows = document.querySelectorAll('#mContracts [id^="ccType_"]');
+  if(!rows.length) return;
+  const ids = [];
+  rows.forEach(inp=>{
+    const cid = Number(inp.id.replace('ccType_',''));
+    if(!ids.includes(cid)) ids.push(cid);
+  });
+  for(const cid of ids){
+    const typeEl = document.getElementById('ccType_'+cid);
+    if(!typeEl) continue;
+    const startEl = document.getElementById('ccStart_'+cid);
+    // 新增行（id=0）若开始日期为空则跳过（避免创建空合同）
+    if(cid===0 && !startEl.value.trim()){
+      continue;
+    }
+    const body = {
+      employee_id: empId,
+      start_date: startEl.value,
+      end_date: document.getElementById('ccEnd_'+cid).value || null,
+      contract_type: document.getElementById('ccType_'+cid).value,
+      status: document.getElementById('ccStatus_'+cid).value,
+      remark: document.getElementById('ccRemark_'+cid).value,
+    };
+    if(cid) await api('/api/contracts/'+cid, {method:'PUT', body});
+    else await api('/api/contracts', {method:'POST', body});
+  }
+  loadEmpContracts(empId);
+}
+
+function openResign(id, name, type){
+  name = decodeURIComponent(name || '');
+  type = type || '离职';
+  const isRetire = type==='退休';
+  document.getElementById('rId').value=id;
+  document.getElementById('rName').textContent=name;
+  document.getElementById('rType').value=type;
+  document.getElementById('rTitle').textContent = isRetire ? '退休登记' : '离职登记';
+  document.getElementById('rDateLabel').textContent = isRetire ? '退休日期' : '离职日期';
+  document.getElementById('rTip').innerHTML = isRetire ? '退休后将自动终止其生效合同' : '离职后将自动终止其生效合同';
+  const btn = document.getElementById('rConfirmBtn');
+  btn.textContent = isRetire ? '确认退休' : '确认离职';
+  btn.className = isRetire ? 'btn btn-warning' : 'btn btn-danger';
+  document.getElementById('rDate').value=localDateStr(new Date());
+  document.getElementById('rRemark').value='';
+  new bootstrap.Modal(document.getElementById('resignModal')).show();
+}
+
+function saveResign(){
+  const type = document.getElementById('rType').value;
+  confirmAction('确定提交'+type+'登记吗？', ()=>{ doSaveResign(); }, true);
+}
+async function doSaveResign(){
+  const id = document.getElementById('rId').value;
+  const type = document.getElementById('rType').value;
+  const r = await api('/api/employees/'+id+'/resign', {method:'POST', body:{
+    status: type,
+    leave_date: document.getElementById('rDate').value,
+    remark: document.getElementById('rRemark').value,
+  }});
+  if(r){ showToast(type+'登记成功','success'); bootstrap.Modal.getInstance(document.getElementById('resignModal')).hide(); loadList(); }
+}
+
+async function openTransfer(id, name){
+  name = decodeURIComponent(name || '');
+  const data = await api('/api/employees?keyword=');
+  if(!data) return;
+  const e = data.items.find(x=>x.id===id);
+  if(!e) return;
+  document.getElementById('tId').value = e.id;
+  document.getElementById('tName').textContent = name;
+  document.getElementById('tDept').value = e.department || '';
+  document.getElementById('tPos').value = e.position || '';
+  document.getElementById('tRemark').value = '';
+  document.getElementById('tDate').value = localDateStr(new Date());
+  new bootstrap.Modal(document.getElementById('transferModal')).show();
+}
+
+function saveTransfer(){
+  confirmAction('确定提交转岗/调动登记吗？', ()=>{ doSaveTransfer(); }, true);
+}
+async function doSaveTransfer(){
+  const id = document.getElementById('tId').value;
+  const body = {
+    department: document.getElementById('tDept').value,
+    position: document.getElementById('tPos').value,
+    remark: document.getElementById('tRemark').value,
+    transfer_date: document.getElementById('tDate').value,
+  };
+  const r = await api('/api/employees/'+id+'/transfer', {method:'POST', body});
+  if(r){ showToast('转岗/调动成功','success'); bootstrap.Modal.getInstance(document.getElementById('transferModal')).hide(); loadList(); }
+}
+
+// 清除本月入职/离职筛选
+function clearPeriod(){
+  const url = new URL(location.href);
+  url.searchParams.delete('period');
+  history.replaceState(null, '', url);
+  document.getElementById('periodTip').style.display='none';
+  loadList();
+}
+
+// 员工信息详情浮框
+// 根据身份证号（18位，第7-14位出生日期）自动计算周岁年龄；身份证无效时回退出生日期
+function calcAge(idCard, birthday){
+  let y=0, m=0, d=0;
+  const id = (idCard||'').trim();
+  if(/^\d{17}[\dXx]$/.test(id)){
+    y = +id.slice(6,10); m = +id.slice(10,12); d = +id.slice(12,14);
+  } else if(birthday){
+    const b = new Date(birthday);
+    if(isNaN(b.getTime())) return '-';
+    y = b.getFullYear(); m = b.getMonth()+1; d = b.getDate();
+  } else return '-';
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  const nm = now.getMonth()+1, nd = now.getDate();
+  if(nm < m || (nm === m && nd < d)) age--;
+  return (age >= 0 && age < 150) ? (age + ' 岁') : '-';
+}
+
+async function showDetail(id){
+  const data = await api('/api/employees?keyword=');
+  if(!data) return;
+  const e = data.items.find(x=>x.id===id);
+  if(!e) return;
+  // 附件信息
+  const attData = await api('/api/attachments?employee_id='+id);
+  let attHtml = '<div class="text-muted">暂无附件</div>';
+  if(attData && attData.items && attData.items.length){
+    attHtml = attData.items.map(a=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px;background:#fff">
+        <div style="flex:1;min-width:0;overflow:hidden">
+          <div style="font-size:13px;font-weight:500;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><i class="bi bi-file-earmark-text" style="color:#2c5aa0"></i> ${a.orig_name}</div>
+          <div style="font-size:13px;color:#9ca3af">${fmtSize(a.size)} · ${a.category||'其他'} · 上传人:${a.uploader||'-'} · ${a.created_at}</div>
+        </div>
+        <div style="flex-shrink:0"><a href="/api/attachments/${a.id}/download" class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> 下载</a></div>
+      </div>`).join('');
+  }
+  const badge = e.status==='在职'?'badge-in-service':(e.status==='退休'?'badge-retired':'badge-resigned');
+  // 合同信息
+  let cinfoHtml = '<div class="text-muted">无合同</div>';
+  if(e.contract_info){
+    const c = e.contract_info;
+    const cbadge = c.status==='生效'?'badge-active':c.status==='终止'?'badge-terminated':'badge-expired';
+    cinfoHtml = `<div class="mb-1"><span class="badge-status ${cbadge}">${c.status}</span>
+      <span style="margin-left:6px;color:#374151">${c.contract_type||''}</span></div>
+      <div>起止：${c.start_date} ~ ${c.end_date||'无固定期限'}</div>
+      <div>续签次数：${c.renew_count||0} 次</div>`;
+  }
+  // 基本信息 + 详细信息
+  const photoHtml = e.photo
+    ? `<img src="/api/employees/${e.id}/photo?t=${Date.now()}" style="width:72px;height:90px;object-fit:cover;border-radius:6px;margin-right:14px;border:1px solid #e5e7eb;flex-shrink:0" alt="证件照">`
+    : `<div class="avatar" style="width:72px;height:90px;font-size:26px;margin-right:14px;border-radius:6px;display:flex;align-items:center;justify-content:center">${e.name.slice(0,1)}</div>`;
+  // 参保信息
+  const insRows = [
+    ['养老保险', e.pension_enroll_date, e.pension_person_no],
+    ['工伤保险', e.injury_enroll_date, e.injury_person_no],
+    ['医疗保险', e.medical_enroll_date, e.medical_person_no],
+    ['生育保险', e.maternity_enroll_date, e.maternity_person_no],
+    ['失业保险', e.unemployment_enroll_date, e.unemployment_person_no],
+    ['住房公积金', e.fund_enroll_date, e.fund_person_no],
+  ];
+  const insHtml = insRows.map(r=>`
+    <tr><td style="color:#6b7280;width:90px">${r[0]}</td>
+        <td>${r[1]||'-'}</td><td>${r[2]||'-'}</td></tr>`).join('');
+  document.getElementById('detailBody').innerHTML = `
+    <div class="d-flex align-items-center mb-3">
+      ${photoHtml}
+      <div>
+        <div style="font-size:18px;font-weight:700">${e.name}
+          <span class="badge-status ${badge}">${e.status}</span>
+        </div>
+        <div style="color:#6b7280">${e.department||'-'} · ${e.position||'-'}</div>
+      </div>
+    </div>
+    <div class="row g-3">
+      <div class="col-6"><h6 class="border-bottom pb-1" style="color:#2c5aa0">基本信息</h6>
+        <table class="table table-sm table-borderless" style="font-size:13px">
+          <tr><td style="color:#6b7280;width:90px">档案编号</td><td>${e.archive_no||'-'}</td></tr>
+          <tr><td style="color:#6b7280">身份证号</td><td>${e.id_card}</td></tr>
+          <tr><td style="color:#6b7280">性别</td><td>${e.gender||'-'}</td></tr>
+          <tr><td style="color:#6b7280">出生日期</td><td>${e.birthday||'-'}</td></tr>
+          <tr><td style="color:#6b7280">年龄</td><td>${calcAge(e.id_card, e.birthday)}</td></tr>
+          <tr><td style="color:#6b7280">电话</td><td>${e.phone||'-'}</td></tr>
+          <tr><td style="color:#6b7280">邮箱</td><td>${e.email||'-'}</td></tr>
+          <tr><td style="color:#6b7280">住址</td><td>${e.address||'-'}</td></tr>
+          <tr><td style="color:#6b7280">入职日期</td><td>${e.hire_date}</td></tr>
+          <tr><td style="color:#6b7280">离职日期</td><td>${e.leave_date||'-'}</td></tr>
+        </table>
+      </div>
+      <div class="col-6"><h6 class="border-bottom pb-1" style="color:#2c5aa0">个人详细信息</h6>
+        <table class="table table-sm table-borderless" style="font-size:13px">
+          <tr><td style="color:#6b7280;width:90px">籍贯</td><td>${e.native_place||'-'}</td></tr>
+          <tr><td style="color:#6b7280">民族</td><td>${e.ethnicity||'-'}</td></tr>
+          <tr><td style="color:#6b7280">婚姻状况</td><td>${e.marital_status||'-'}</td></tr>
+          <tr><td style="color:#6b7280">学历</td><td>${e.education||'-'}</td></tr>
+          <tr><td style="color:#6b7280">毕业院校</td><td>${e.school||'-'}</td></tr>
+          <tr><td style="color:#6b7280">政治面貌</td><td>${e.political_status||'-'}</td></tr>
+          <tr><td style="color:#6b7280">紧急联系人</td><td>${e.emergency_contact||'-'}</td></tr>
+          <tr><td style="color:#6b7280">紧急电话</td><td>${e.emergency_phone||'-'}</td></tr>
+        </table>
+      </div>
+    </div>
+    <h6 class="border-bottom pb-1 mt-2" style="color:#2c5aa0">劳动合同</h6>
+    ${cinfoHtml}
+    <h6 class="border-bottom pb-1 mt-2" style="color:#2c5aa0">参保信息</h6>
+    <table class="table table-sm table-borderless" style="font-size:13px">
+      <thead><tr><td style="color:#6b7280;width:90px;font-weight:600">险种</td>
+        <td style="color:#6b7280;font-weight:600">参保时间</td>
+        <td style="color:#6b7280;font-weight:600">个人编号</td></tr></thead>
+      <tbody>${insHtml}</tbody>
+    </table>
+    <h6 class="border-bottom pb-1 mt-2" style="color:#2c5aa0">附件信息</h6>
+    ${attHtml}
+    ${e.remark?`<div class="mt-3 p-2" style="background:#f9fafb;border-radius:6px"><b style="color:#6b7280">备注：</b>${e.remark}</div>`:''}
+  `;
+  new bootstrap.Modal(document.getElementById('detailModal')).show();
+}
+
+// ============ 编辑弹窗内合同管理（直接可编辑） ============
+let currentEmpId = null;
+let currentEmpName = '';
+
+const CTYPE_OPTS = ['固定期限','无固定期限','以完成一定工作任务为期限'];
+const CSTATUS_OPTS = ['生效','到期','终止'];
+function selOptions(list, cur){ return list.map(v=>`<option ${v===cur?'selected':''}>${v}</option>`).join(''); }
+
+// 渲染单条合同编辑行
+function contractRow(c){
+  const no = c.contract_no||'';
+  const start = c.start_date||'';
+  const end = c.end_date||'';
+  const type = c.contract_type||'固定期限';
+  const status = c.status||'生效';
+  const remark = c.remark||'';
+  const renewCount = c.renew_count||0;
+  const renews = c.renews||[];
+  const renewListHtml = renews.length ? renews.map((r, idx)=>{
+    const n = renews.length - idx; // 序号（新的在前，倒序编号）
+    return `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px dashed #e5e7eb;font-size:13px">
+      <div style="flex:1"><b style="color:#2c5aa0">第${n}次续签</b> <span style="color:#6b7280">${r.renew_date}</span> <span style="color:#9ca3af">${r.old_end_date||'-'} → ${r.new_end_date||'-'}</span>${r.remark?` <span style="color:#9ca3af">(${r.remark})</span>`:''}</div>
+    </div>`;
+  }).join('')
+    : '<div style="color:#9ca3af;padding:4px 0;font-size:13px">暂无续签记录</div>';
+  return `<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:#fafbfc">
+    <div class="row g-2">
+      <div class="col-4"><label class="modal-label">合同类型</label>
+        <select class="form-select form-select-sm" id="ccType_${c.id}">${selOptions(CTYPE_OPTS, type)}</select></div>
+      <div class="col-4"><label class="modal-label">开始日期${!isAdmin && c.id ? '<span style="color:#dc2626;font-size:11px">（仅管理员可改）</span>' : ''}</label>
+        <input type="date" class="form-control form-control-sm" id="ccStart_${c.id}" value="${start}" ${!isAdmin && c.id ? 'disabled title="合同起止时间仅管理员可修改"' : ''}></div>
+      <div class="col-4"><label class="modal-label">到期日期(空=无固定)${!isAdmin && c.id ? '<span style="color:#dc2626;font-size:11px">（仅管理员可改）</span>' : ''}</label>
+        <input type="date" class="form-control form-control-sm" id="ccEnd_${c.id}" value="${end}" ${!isAdmin && c.id ? 'disabled title="合同起止时间仅管理员可修改"' : ''}></div>
+    </div>
+    <div class="row g-2 mt-1">
+      <div class="col-3"><label class="modal-label">状态</label>
+        <select class="form-select form-select-sm" id="ccStatus_${c.id}">${selOptions(CSTATUS_OPTS, status)}</select></div>
+      <div class="col-3"><label class="modal-label">续签次数</label>
+        <div class="d-flex align-items-center" style="gap:6px">
+          <span class="form-control form-control-sm" id="ccRenew_${c.id}" style="background:#f1f5f9;max-width:60px;text-align:center;font-weight:600">${renewCount}</span>
+          ${c.id?`<button class="btn btn-outline-primary btn-sm" onclick="toggleRenewPanel(${c.id})"><i class="bi bi-arrow-repeat"></i> 续签详情</button>`:''}
+        </div></div>
+      <div class="col-6"><label class="modal-label">备注</label>
+        <input class="form-control form-control-sm" id="ccRemark_${c.id}" value="${remark.replace(/"/g,'&quot;')}"></div>
+    </div>
+    ${c.id?`<div id="renewPanel_${c.id}" style="display:none;margin-top:8px;padding:8px;background:#fff;border:1px solid #e5e7eb;border-radius:6px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <div style="font-size:13px;font-weight:600;color:#374151"><i class="bi bi-arrow-repeat" style="color:#2c5aa0"></i> 续签记录（${renewCount}次）</div>
+        <button class="btn btn-outline-primary btn-sm" onclick="openRenewForm(${c.id})"><i class="bi bi-plus-lg"></i> 添加续签</button>
+      </div>
+      <div id="renewList_${c.id}">${renewListHtml}</div>
+      <div id="renewForm_${c.id}" style="display:none;margin-top:8px;padding-top:8px;border-top:1px solid #e5e7eb">
+        <div class="row g-2">
+          <div class="col-4"><label class="modal-label">续签日期</label>
+            <input type="date" class="form-control form-control-sm" id="rnDate_${c.id}" value="${localDateStr(new Date())}"></div>
+          <div class="col-4"><label class="modal-label">新到期日</label>
+            <input type="date" class="form-control form-control-sm" id="rnNewEnd_${c.id}"></div>
+          <div class="col-4"><label class="modal-label">备注</label>
+            <input class="form-control form-control-sm" id="rnRemark_${c.id}" placeholder="续签说明"></div>
+        </div>
+        <div class="mt-2 d-flex justify-content-end" style="gap:6px">
+          <button class="btn btn-sm btn-secondary" onclick="closeRenewForm(${c.id})">取消</button>
+          <button class="btn btn-sm btn-primary" onclick="saveContractRenew(${c.id})">保存续签</button>
+        </div>
+      </div>
+    </div>`:''}
+  </div>`;
+}
+
+function toggleRenewPanel(cid){
+  const panel = document.getElementById('renewPanel_'+cid);
+  if(panel) panel.style.display = panel.style.display==='none' ? 'block' : 'none';
+}
+function openRenewForm(cid){
+  document.getElementById('renewForm_'+cid).style.display='block';
+}
+function closeRenewForm(cid){
+  document.getElementById('renewForm_'+cid).style.display='none';
+}
+
+function saveContractRenew(cid){
+  confirmAction('确定保存续签记录并更新合同到期日吗？', ()=>{ doSaveContractRenew(cid); });
+}
+async function doSaveContractRenew(cid){
+  const body = {
+    renew_date: document.getElementById('rnDate_'+cid).value,
+    new_end_date: document.getElementById('rnNewEnd_'+cid).value,
+    remark: document.getElementById('rnRemark_'+cid).value,
+  };
+  const r = await api('/api/contracts/'+cid+'/renews', {method:'POST', body});
+  if(r){ showToast('续签成功，合同到期日已更新','success'); loadEmpContracts(currentEmpId); }
+}
+
+async function loadEmpContracts(empId){
+  const data = await api('/api/contracts?keyword=');
+  if(!data) return;
+  const list = data.items.filter(c=>c.employee_id===empId);
+  const box = document.getElementById('mContracts');
+  if(list.length===0){
+    box.innerHTML = '<div style="color:#9ca3af;text-align:center;padding:12px">暂无合同，点击右上角"新增合同"添加</div>';
+    return;
+  }
+  box.innerHTML = list.map(c=>contractRow(c)).join('');
+}
+
+function openEmpContract(){
+  if(!currentEmpId){ showToast('请先选择员工','error'); return; }
+  // 在列表顶部插入一个空的合同编辑行（id=0 表示新增）
+  const box = document.getElementById('mContracts');
+  const empty = {id:0,
+    start_date:document.getElementById('mHire').value||localDateStr(new Date()),
+    end_date:'', contract_type:'固定期限', status:'生效', remark:''};
+  // 若已有空行则不重复添加
+  if(document.getElementById('ccType_0')) return;
+  box.insertAdjacentHTML('afterbegin', contractRow(empty));
+  document.getElementById('ccStart_0').focus();
+}
+
+// 合同保存已统一在页面底部"保存"按钮中处理（saveEmp → saveAllContracts）
+
+// ============ 附件管理 ============
+function fmtSize(n){
+  if(n>=1024*1024) return (n/1024/1024).toFixed(1)+'MB';
+  if(n>=1024) return (n/1024).toFixed(1)+'KB';
+  return n+'B';
+}
+
+async function loadEmpAttachments(empId){
+  if(!empId){ document.getElementById('mAttachments').innerHTML='<div style="color:#9ca3af;text-align:center;padding:12px">保存员工后可在此上传附件</div>'; return; }
+  const data = await api('/api/attachments?employee_id='+empId);
+  if(!data) return;
+  const box = document.getElementById('mAttachments');
+  if(data.items.length===0){
+    box.innerHTML = '<div style="color:#9ca3af;text-align:center;padding:12px">暂无附件，点击右上角"上传附件"添加</div>';
+    return;
+  }
+  box.innerHTML = data.items.map(a=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid #e5e7eb;border-radius:6px;margin-bottom:6px;background:#fff">
+      <div style="flex:1;min-width:0;overflow:hidden">
+        <div style="font-size:13px;font-weight:500;color:#374151;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          <i class="bi bi-file-earmark-text" style="color:#2c5aa0"></i> ${a.orig_name}
+        </div>
+        <div style="font-size:13px;color:#9ca3af">${fmtSize(a.size)} · ${a.category||'其他'} · 上传人:${a.uploader||'-'} · ${a.created_at}</div>
+      </div>
+      <div style="flex-shrink:0;display:flex;gap:6px">
+        <a href="/api/attachments/${a.id}/download" class="btn btn-sm btn-outline-primary"><i class="bi bi-download"></i> 下载</a>
+        <button class="btn btn-sm btn-outline-danger" onclick="delAttachment(${a.id})"><i class="bi bi-trash"></i></button>
+      </div>
+    </div>`).join('');
+}
+
+function openAttachUpload(){
+  if(!currentEmpId){ showToast('请先选择员工','error'); return; }
+  document.getElementById('mAttachFile').click();
+}
+
+async function uploadAttachment(file){
+  if(!currentEmpId){ showToast('请先选择员工','error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  fd.append('employee_id', currentEmpId);
+  const r = await fetch('/api/attachments', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'上传失败','error'); return; }
+  showToast('附件上传成功','success');
+  loadEmpAttachments(currentEmpId);
+}
+
+function delAttachment(aid){
+  confirmAction('确认删除该附件吗？', async ()=>{ await doDelAttachment(aid); }, true);
+}
+async function doDelAttachment(aid){
+  const r = await api('/api/attachments/'+aid, {method:'DELETE'});
+  if(r){ showToast('附件已删除','success'); loadEmpAttachments(currentEmpId); }
+}
+
+// 文件选择后自动上传
+document.getElementById('mAttachFile').addEventListener('change', function(){
+  if(this.files.length) uploadAttachment(this.files[0]);
+  this.value='';
+});
+
+// ============ 个人证件照上传 ============
+async function uploadPhoto(file){
+  if(!currentEmpId){ showToast('请先保存员工信息后再上传证件照','error'); return; }
+  const fd = new FormData();
+  fd.append('file', file);
+  const r = await fetch('/api/employees/'+currentEmpId+'/photo', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  if(!r.ok){ showToast(data.error||'上传失败','error'); return; }
+  // 上传后即时显示
+  document.getElementById('mPhotoImg').src = '/api/employees/'+currentEmpId+'/photo?t='+Date.now();
+  document.getElementById('mPhotoImg').style.display='block';
+  document.getElementById('mPhotoPlaceholder').style.display='none';
+  showToast('证件照已更新','success');
+}
+document.getElementById('mPhotoFile').addEventListener('change', function(){
+  if(this.files.length) uploadPhoto(this.files[0]);
+  this.value='';
+});
+
+// ============ 批量导入员工 ============
+let importFile = null;
+function openImportModal(){
+  importFile = null;
+  document.getElementById('importFileName').textContent = '';
+  document.getElementById('importFile').value = '';
+  document.getElementById('importResult').innerHTML = '';
+  new bootstrap.Modal(document.getElementById('importModal')).show();
+}
+document.getElementById('importFile').addEventListener('change', function(){
+  if(this.files.length){
+    importFile = this.files[0];
+    document.getElementById('importFileName').textContent = importFile.name;
+  }
+});
+async function doImport(ev){
+  if(!importFile){ showToast('请先选择文件','error'); return; }
+  const fd = new FormData();
+  fd.append('file', importFile);
+  const btn = (ev && ev.target && ev.target.closest) ? ev.target.closest('button') : document.querySelector('#importModal .btn-primary');
+  const oldHtml = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 导入中...';
+  const r = await fetch('/api/employees/import', {method:'POST', body:fd});
+  const data = await r.json().catch(()=>({}));
+  btn.disabled = false;
+  btn.innerHTML = oldHtml;
+  if(!r.ok){
+    document.getElementById('importResult').innerHTML =
+      `<div class="alert alert-danger" style="font-size:13px;margin-bottom:0">${data.error||'导入失败'}</div>`;
+    showToast(data.error||'导入失败','error'); return;
+  }
+  let msg = data.msg || '导入完成';
+  // 行级异常：在弹窗内展示明细，不关闭弹窗，便于定位问题行
+  if(data.errors && data.errors.length){
+    const det = data.errors.map(e=>`第 ${e.row} 行（${e.name||e.id_card||'-'}）：${e.error}`).join('<br>');
+    document.getElementById('importResult').innerHTML =
+      `<div class="alert alert-danger" style="font-size:13px;margin-bottom:0">导入部分失败，共 ${data.errors.length} 行异常：<br>${det}</div>`;
+    showToast(msg, 'warning');
+    return;
+  }
+  if(data.duplicates && data.duplicates.length){
+    msg += `；重复跳过：${data.duplicates.map(d=>d.name).join('、')}`;
+  }
+  document.getElementById('importResult').innerHTML =
+    `<div class="alert alert-success" style="font-size:13px;margin-bottom:0">${msg}</div>`;
+  showToast(msg, 'success');
+  bootstrap.Modal.getInstance(document.getElementById('importModal')).hide();
+  loadList();
+}
+
+loadDicts().then(()=>{
+  // 支持 URL 参数 ?status=在职/离职 或 ?period=month_hired/month_left 进入时自动筛选
+  const params = new URLSearchParams(location.search);
+  const s = params.get('status');
+  if(s) document.getElementById('fStatus').value = s;
+  loadList().then(()=>{
+    // 若有 period 参数，显示筛选提示条
+    const p = params.get('period');
+    if(p){
+      const tip = document.getElementById('periodTip');
+      const label = p==='month_hired' ? '本月入职' : '本月离职';
+      tip.style.display='flex';
+      document.getElementById('periodTipText').textContent = '当前查看：'+label+'（'+new Date().getFullYear()+'年'+(new Date().getMonth()+1)+'月）';
+    }
+  });
+});
+</script>
+{% endblock %}

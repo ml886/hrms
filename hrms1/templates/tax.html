@@ -1,0 +1,402 @@
+{% extends 'base.html' %}
+{% block page_title %}个税管理{% endblock %}
+{% block content %}
+<style>
+.tax-wrap{max-width:100%}
+.page-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.page-bar .title{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;color:#1f2937}
+.page-bar .title i{color:#2c5aa0}
+.filter-card{background:#fff;border:1px solid #eef2f7;border-radius:12px;padding:14px 16px;margin-bottom:16px;box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.tax-table{table-layout:auto;width:100%}
+.tax-table th,.tax-table td{white-space:nowrap;text-align:center;padding:8px 10px;font-size:13px}
+.tax-table thead tr th{background:#2c5aa0;color:#fff;font-weight:600;vertical-align:middle}
+.tax-table tbody tr:nth-child(even){background:#f8fafc}
+.tax-table tbody tr:hover{background:#eef4fc}
+.tax-table td.num{text-align:right;font-variant-numeric:tabular-nums}
+.tax-table .seq{color:#9ca3af;font-variant-numeric:tabular-nums}
+.tax-table .diff-pos{color:#16a34a;font-weight:600}
+.tax-table .diff-neg{color:#dc2626;font-weight:600}
+.diff-pos{color:#16a34a;font-weight:600}
+.diff-neg{color:#dc2626;font-weight:600}
+.tax-table .op{white-space:nowrap}
+.list-card{background:#fff;border:1px solid #eef2f7;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);overflow:hidden}
+.pagination-info{font-size:13px;color:#6b7280}
+.empty{text-align:center;color:#9ca3af;padding:40px 0;font-size:14px}
+.unit-check-list{max-height:240px;overflow:auto}
+.unit-check-list .form-check{margin-bottom:2px}
+.edit-months{table-layout:fixed;width:100%}
+.edit-months th,.edit-months td{padding:3px 5px;font-size:12px;white-space:normal;word-break:break-word;vertical-align:top}
+.edit-months input{width:100%;min-width:0;font-size:12px;padding:2px 3px}
+</style>
+
+<div class="tax-wrap">
+  <div class="page-bar">
+    <div class="title"><i class="bi bi-receipt"></i> 个税管理</div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-success btn-sm" onclick="exportTax()"><i class="bi bi-download"></i> 导出</button>
+      {% if can_manage_module('salary') %}
+      <button class="btn btn-success btn-sm" onclick="recalc()"><i class="bi bi-arrow-repeat"></i> 按年累计计算并保存</button>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="filter-card">
+    <div class="row align-items-end g-2">
+      <div class="col-auto">
+        <label class="modal-label mb-1">年份</label>
+        <select id="fYear" class="form-select form-select-sm" style="width:auto" onchange="goPage(1)"></select>
+      </div>
+      <div class="col-auto">
+        <label class="modal-label mb-1">客户单位（可单选/多选）</label>
+        <div class="dropdown">
+          <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" id="unitFilterBtn"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+            客户单位：<span id="unitFilterLabel">全部</span>
+          </button>
+          <div class="dropdown-menu p-2">
+            <div class="d-flex justify-content-between mb-2 px-1">
+              <span class="small text-muted">客户单位（可多选）</span>
+              <span>
+                <a href="javascript:void(0)" class="small" onclick="unitSetAll(true)">全选</a>
+                <span class="text-muted">·</span>
+                <a href="javascript:void(0)" class="small" onclick="unitSetAll(false)">清空</a>
+              </span>
+            </div>
+            <div id="unitFilterList" class="unit-check-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-auto" style="flex:1;min-width:200px">
+        <label class="modal-label mb-1">姓名 / 身份证号</label>
+        <input id="fKeyword" class="form-control form-control-sm" placeholder="输入关键字后回车或点查询" onkeydown="if(event.key==='Enter'){goPage(1)}">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm" onclick="goPage(1)"><i class="bi bi-search"></i> 查询</button>
+        <span class="text-muted ms-2" style="font-size:13px">共 <b id="totalCount">0</b> 人</span>
+      </div>
+    </div>
+    <div class="text-muted mt-2" style="font-size:12px">按税务规定<b>累计预扣法</b>计算每人每月个税：累计应纳税所得额 = 累计应发 − 累计减除费用(5000×月数) − 累计社保个人 − 累计公积金个人；本月预扣 = 累计应纳税额 − 累计已预扣。可对比“原记录”差异并写回。</div>
+  </div>
+
+  <div class="list-card">
+    <div class="table-responsive horiz-scroll">
+      <table class="table table-sm tax-table mb-0">
+        <thead><tr id="headRow"></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+    <div class="d-flex justify-content-between align-items-center p-3 flex-wrap gap-2" id="pagerBox">
+      <div class="pagination-info">共 <b id="pgTotal">0</b> 人 · 第 <b id="pgCur">0</b>/<span id="pgPages">0</span> 页</div>
+      <div class="d-flex align-items-center gap-2">
+        <label style="font-size:13px;color:#6b7280;margin:0">每页
+          <select id="pgSize" onchange="changePageSize()" style="font-size:13px">
+            <option value="10" selected>10</option><option value="20">20</option>
+            <option value="50">50</option><option value="100">100</option>
+          </select> 人
+        </label>
+        <ul class="pagination pagination-sm mb-0" id="pgButtons"></ul>
+        <label style="font-size:13px;color:#6b7280;margin:0">跳至
+          <input type="number" id="pgJump" min="1" style="width:60px;font-size:13px" value="1"> 页
+        </label>
+        <button class="btn btn-outline-primary btn-sm" onclick="jumpPage()">跳转</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 修改个税明细弹窗（完整信息面板） -->
+<div class="modal fade" id="editTaxModal" tabindex="-1">
+  <div class="modal-dialog modal-xl modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="border-bottom:1px solid #eef2f7">
+        <h6 class="modal-title"><i class="bi bi-pencil-square"></i> 修改个税明细（全年汇总）</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <!-- 人员信息卡：所有修改相关信息集中展示 -->
+        <div class="card mb-2" style="background:#f8fafc;border-color:#eef2f7">
+          <div class="card-body py-1 px-3">
+            <div class="row g-3 align-items-end">
+              <div class="col-auto">
+                <div class="modal-label mb-1">姓名</div>
+                <div class="fw-semibold" id="editName">-</div>
+              </div>
+              <div class="col-auto" style="min-width:210px">
+                <div class="modal-label mb-1">身份证号</div>
+                <div class="text-muted" id="editIdCard">-</div>
+              </div>
+              <div class="col-auto">
+                <div class="modal-label mb-1">客户单位（应用到全部月份）</div>
+                <select id="editClientUnit" class="form-select form-select-sm" style="min-width:160px"></select>
+              </div>
+              <div class="col-auto">
+                <div class="modal-label mb-1">所属年度 / 期间范围</div>
+                <div class="text-muted" id="editPeriodRange">-</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <table class="table table-bordered edit-months mb-0">
+            <colgroup>
+              <col style="width:70px"><col style="width:11%"><col style="width:10%"><col style="width:10%"><col style="width:10%"><col style="width:18%"><col style="width:10%"><col style="width:10%"><col style="width:11%">
+            </colgroup>
+            <thead><tr>
+              <th>期间</th><th>应发工资</th><th>社保个人</th><th>公积金个人</th><th>个税</th>
+              <th>备注</th><th>系统计算</th><th>原记录</th><th>差异</th>
+            </tr></thead>
+            <tbody id="editMonthsBody"></tbody>
+            <tfoot id="editMonthsFoot"></tfoot>
+          </table>
+        </div>
+        <p class="small text-muted mt-2 mb-0">可修改：应发工资 / 社保个人 / 公积金个人 / 个税 / 备注（保存即写回工资明细）；系统计算列为累计预扣法参考值（只读）。差异 = 系统计算 − 原记录（绿色=系统计算更大 / 红色=原记录更大）。</p>
+      </div>
+      <div class="modal-footer" style="border-top:1px solid #eef2f7;padding-top:12px">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="saveTaxEdit()"><i class="bi bi-check-lg"></i> 保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allItems = [];
+let monthsList = [];
+let curYear = String(new Date().getFullYear());
+let pgCurrent = 1, pgPageSize = 10, pgTotal = 0;
+let taxUnits = [];       // 当前筛选选中的客户单位
+let __units = [];        // 客户单位选项（关联代码字段）
+
+async function loadYears(){
+  const d = await api('/api/salary/periods');
+  const sel = document.getElementById('fYear');
+  let years = d && d.items ? [...new Set(d.items.map(p=>p.slice(0,4)))] : [];
+  if(!years.includes(curYear)) years.unshift(curYear);
+  years.sort().reverse();
+  sel.innerHTML = years.map(y=>`<option value="${y}">${y}</option>`).join('');
+  if(years.includes(curYear)) sel.value = curYear;
+}
+
+function fmt(v){ return (parseFloat(v||0)||0).toFixed(2); }
+
+// ---------- 客户单位多选 ----------
+function renderUnitChecks(listId, selected, options){
+  const box = document.getElementById(listId);
+  if(!options || !options.length){ box.innerHTML = '<div class="px-1 small text-muted">暂无客户单位</div>'; return; }
+  box.innerHTML = options.map((u,i)=>`<div class="form-check"><input class="form-check-input" type="checkbox" id="${listId}_${i}" data-u="${esc(u)}" ${selected.includes(u)?'checked':''} onchange="unitToggle()"><label class="form-check-label small" for="${listId}_${i}">${esc(u)}</label></div>`).join('');
+}
+function unitToggle(){
+  const box = document.getElementById('unitFilterList');
+  taxUnits = [...box.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>c.dataset.u);
+  updateUnitLabel(); goPage(1);
+}
+function unitSetAll(state){
+  document.getElementById('unitFilterList').querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=state);
+  unitToggle();
+}
+function updateUnitLabel(){
+  const lbl = document.getElementById('unitFilterLabel');
+  if(!taxUnits.length) lbl.textContent='全部';
+  else if(taxUnits.length===1) lbl.textContent=taxUnits[0];
+  else lbl.textContent=`已选 ${taxUnits.length} 个`;
+}
+
+async function loadTax(){
+  const year = document.getElementById('fYear').value || curYear;
+  const kw = document.getElementById('fKeyword').value.trim();
+  const units = taxUnits.join(',');
+  const data = await api(`/api/tax/summary?year=${encodeURIComponent(year)}&keyword=${encodeURIComponent(kw)}&units=${encodeURIComponent(units)}&page=${pgCurrent}&size=${pgPageSize}`);
+  if(!data) return;
+  if(data.units){ __units = data.units; renderUnitChecks('unitFilterList', taxUnits, __units); updateUnitLabel(); }
+  allItems = data.items || [];
+  monthsList = data.months || [];
+  pgTotal = data.total;
+  document.getElementById('totalCount').textContent = data.total;
+  renderHead();
+  renderPage();
+}
+
+function renderHead(){
+  const head = document.getElementById('headRow');
+  let html = '<th>序号</th><th>客户单位</th><th>员工姓名</th><th>身份证号</th>';
+  monthsList.forEach(m=>{ html += `<th>${m.slice(5)}月</th>`; });
+  html += '<th>系统计算</th><th>原记录</th><th>差异</th><th>备注</th><th>操作</th>';
+  head.innerHTML = html;
+}
+
+function renderRow(d, idx){
+  const seq = (pgCurrent - 1) * pgPageSize + idx + 1;
+  let html = `<td class="seq">${seq}</td><td>${esc(d.department)}</td><td>${escapeHtml(d.name)}</td><td>${esc(d.id_card)}</td>`;
+  monthsList.forEach(m=>{
+    const cell = d.months[m];
+    if(cell){
+      const tip = `应发:${fmt(cell.should)} 累计应纳税所得额:${fmt(cell.taxable)}`;
+      html += `<td class="num" title="${tip}">${fmt(Math.abs(cell.calc))}</td>`;
+    } else {
+      html += '<td>-</td>';
+    }
+  });
+  html += `<td class="num">${fmt(Math.abs(d.total_calc))}</td>`;
+  html += `<td class="num">${fmt(Math.abs(d.total_rec))}</td>`;
+  const diff = d.diff;
+  const cls = diff > 0 ? 'diff-pos' : (diff < 0 ? 'diff-neg' : '');
+  html += `<td class="num ${cls}">${fmt(Math.abs(diff))}</td>`;
+  html += `<td class="text-start">${esc(d.remark||'')}</td>`;
+  html += `<td class="op"><button class="btn btn-sm btn-outline-secondary" data-id="${esc(d.id_card)}" onclick="openTaxEdit(this)" title="修改"><i class="bi bi-pencil"></i></button></td>`;
+  return `<tr>${html}</tr>`;
+}
+
+function renderPage(){
+  const tb = document.getElementById('listBody');
+  if(!allItems || allItems.length === 0){
+    tb.innerHTML = `<tr><td colspan="${monthsList.length + 9}" class="empty">暂无数据</td></tr>`;
+    document.getElementById('pagerBox').style.display = 'none';
+    return;
+  }
+  document.getElementById('pagerBox').style.display = '';
+  tb.innerHTML = allItems.map((d,i)=>renderRow(d, i)).join('');
+  renderPager();
+}
+
+function renderPager(){
+  const totalPages = Math.max(1, Math.ceil(pgTotal / pgPageSize));
+  document.getElementById('pgTotal').textContent = pgTotal;
+  document.getElementById('pgCur').textContent = pgCurrent;
+  document.getElementById('pgPages').textContent = totalPages;
+  document.getElementById('pgJump').value = pgCurrent;
+  let btn = ''; const page = pgCurrent;
+  let start = Math.max(1, page-2), end = Math.min(totalPages, page+2);
+  btn += `<li class="page-item ${page<=1?'disabled':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${page-1})">&laquo;</a></li>`;
+  if(start>1) btn += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goPage(1)">1</a></li>`;
+  if(start>2) btn += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+  for(let i=start;i<=end;i++) btn += `<li class="page-item ${i===page?'active':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${i})">${i}</a></li>`;
+  if(end<totalPages-1) btn += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+  if(end<totalPages) btn += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goPage(${totalPages})">${totalPages}</a></li>`;
+  btn += `<li class="page-item ${page>=totalPages?'disabled':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${page+1})">&raquo;</a></li>`;
+  document.getElementById('pgButtons').innerHTML = btn;
+}
+
+function goPage(p){
+  const totalPages = Math.max(1, Math.ceil(pgTotal / pgPageSize));
+  if(p<1||p>totalPages) return;
+  pgCurrent = p; loadTax();
+}
+function jumpPage(){ const v=parseInt(document.getElementById('pgJump').value); if(v) goPage(v); }
+function changePageSize(){ pgPageSize=parseInt(document.getElementById('pgSize').value); pgCurrent=1; loadTax(); }
+
+async function recalc(){
+  const year = document.getElementById('fYear').value || curYear;
+  confirmAction(`确定按 ${year} 年累计预扣法重新计算并写回个税？`, async ()=>{
+    const r = await api('/api/tax/recalculate', {method:'POST', body:{year: year}});
+    if(!r) return;
+    showToast(r.msg || '已重算', 'success');
+    loadTax();
+  }, true);
+}
+
+function exportTax(){
+  const year = document.getElementById('fYear').value || curYear;
+  const kw = document.getElementById('fKeyword').value.trim();
+  const units = taxUnits.join(',');
+  const url = `/api/tax/export?year=${encodeURIComponent(year)}&keyword=${encodeURIComponent(kw)}&units=${encodeURIComponent(units)}`;
+  window.open(url, '_blank');
+}
+
+// ===== 修改个税明细 =====
+let editIdCard = '';
+async function openTaxEdit(btn){
+  const idCard = (btn && btn.dataset && btn.dataset.id) ? btn.dataset.id : '';
+  editIdCard = idCard;
+  const year = document.getElementById('fYear').value || curYear;
+  document.getElementById('editIdCard').textContent = idCard;
+  const sel = document.getElementById('editClientUnit');
+  sel.innerHTML = (__units||[]).map(u=>`<option value="${esc(u)}">${esc(u)}</option>`).join('') || '<option value="">（无客户单位）</option>';
+  const d = await api(`/api/tax/person/${encodeURIComponent(idCard)}?year=${encodeURIComponent(year)}`);
+  if(!d){ showToast('未找到该人员明细', 'error'); return; }
+  document.getElementById('editName').textContent = d.name || '';
+  if(d.units && d.units.length){ sel.innerHTML = d.units.map(u=>`<option value="${esc(u)}">${esc(u)}</option>`).join(''); }
+  sel.value = d.client_unit || '';
+  // 期间范围（年度 + 起止月份）
+  const recs = d.records || [];
+  const per = recs.map(r=>r.period).sort();
+  document.getElementById('editPeriodRange').textContent =
+    (per.length ? `${per[0]} ~ ${per[per.length-1]}` : '-') + `（${d.year||year} 年 · 共 ${per.length} 个月）`;
+  const tb = document.getElementById('editMonthsBody');
+  tb.innerHTML = recs.map(r=>{
+    const calc = Number(r.calc||0), rec = Math.abs(Number(r.tax||0));
+    const diff = calc - rec;
+    const diffCls = diff>0 ? 'diff-pos' : (diff<0 ? 'diff-neg' : '');
+    return `<tr data-period="${r.period}">
+      <td>${r.period}</td>
+      <td><input class="form-control form-control-sm" data-f="should_pay" value="${r.should_pay}"></td>
+      <td><input class="form-control form-control-sm" data-f="social_personal" value="${r.social_personal}"></td>
+      <td><input class="form-control form-control-sm" data-f="fund_personal" value="${r.fund_personal}"></td>
+      <td><input class="form-control form-control-sm" data-f="tax" value="${Math.abs(r.tax)}"></td>
+      <td><input class="form-control form-control-sm" data-f="remark" value="${esc(r.remark||'')}" placeholder="可修改备注"></td>
+      <td class="num">${fmt(calc)}</td>
+      <td class="num">${fmt(rec)}</td>
+      <td class="num ${diffCls}">${fmt(Math.abs(diff))}</td>
+    </tr>`;
+  }).join('');
+  renderEditTaxSummary();
+  new bootstrap.Modal(document.getElementById('editTaxModal')).show();
+}
+
+// 弹窗底部：全年合计（系统计算 / 原记录 / 差异）汇总行
+function renderEditTaxSummary(){
+  const foot = document.getElementById('editMonthsFoot');
+  if(!foot) return;
+  const rows = [...document.querySelectorAll('#editMonthsBody tr')];
+  let sc = 0, sr = 0;
+  rows.forEach(tr=>{
+    const nums = tr.querySelectorAll('td.num');
+    sc += parseFloat(nums[0] ? nums[0].textContent : 0) || 0;
+    sr += parseFloat(nums[1] ? nums[1].textContent : 0) || 0;
+  });
+  const diff = sc - sr;
+  const cls = diff>0 ? 'diff-pos' : (diff<0 ? 'diff-neg' : '');
+  foot.innerHTML = `<tr class="table-light fw-bold">
+    <td>全年合计</td>
+    <td colspan="5"></td>
+    <td class="num">${fmt(sc)}</td>
+    <td class="num">${fmt(sr)}</td>
+    <td class="num ${cls}">${fmt(Math.abs(diff))}</td>
+  </tr>`;
+}
+
+async function saveTaxEdit(){
+  const year = document.getElementById('fYear').value || curYear;
+  const cu = document.getElementById('editClientUnit').value;
+  // 身份证号以弹窗显示框为准，避免按钮参数拼接丢失
+  const idCard = (document.getElementById('editIdCard').textContent || '').trim() || editIdCard;
+  if(!idCard){
+    showToast('身份证号缺失，无法保存', 'error');
+    return;
+  }
+  const rows = [...document.querySelectorAll('#editMonthsBody tr')];
+  const months = rows.map(tr=>{
+    const period = tr.dataset.period;
+    const get = f => tr.querySelector(`input[data-f="${f}"]`).value;
+    return {
+      period,
+      should_pay: get('should_pay'),
+      social_personal: get('social_personal'),
+      fund_personal: get('fund_personal'),
+      tax: get('tax'),
+      remark: get('remark'),
+    };
+  });
+  const r = await api('/api/tax/person', {method:'PUT', body:{id_card: idCard, year, client_unit: cu, months}});
+  if(!r) return;
+  showToast(r.msg || '已保存', 'success');
+  bootstrap.Modal.getInstance(document.getElementById('editTaxModal')).hide();
+  loadTax();
+}
+
+function escapeHtml(s){ return esc(s); }  // 统一走全局 esc
+
+loadYears().then(loadTax);
+</script>
+{% endblock %}

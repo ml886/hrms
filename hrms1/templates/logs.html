@@ -1,0 +1,108 @@
+{% extends 'base.html' %}
+{% block page_title %}操作记录查询{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-clock-history"></i> 操作记录查询</h5>
+      <div style="font-size:12px;color:#9ca3af">最多显示最近 500 条记录</div>
+    </div>
+
+    <div class="filter-bar" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end">
+      <div>
+        <label class="modal-label" style="font-size:12px">模块</label>
+        <select id="fModule" onchange="loadList()" class="form-select">
+          <option value="">全部模块</option>
+          <option>员工</option><option>合同</option><option>附件</option>
+          <option>待办</option><option>账号</option><option>字典</option><option>五险一金</option>
+        </select>
+      </div>
+      <div>
+        <label class="modal-label" style="font-size:12px">操作类型</label>
+        <select id="fAction" onchange="loadList()" class="form-select">
+          <option value="">全部操作</option>
+          <option>新增</option><option>编辑</option><option>删除</option><option>离职</option>
+          <option>转岗</option><option>续签</option><option>删除续签</option><option>上传</option><option>导入</option>
+        </select>
+      </div>
+      <div>
+        <label class="modal-label" style="font-size:12px">操作人</label>
+        <input id="fOperator" class="form-control" placeholder="账号/姓名" style="width:140px">
+      </div>
+      <div>
+        <label class="modal-label" style="font-size:12px">关键字</label>
+        <input id="fKeyword" class="form-control" placeholder="对象/详情" style="width:160px">
+      </div>
+      <div>
+        <label class="modal-label" style="font-size:12px">开始日期</label>
+        <input id="fStart" type="date" class="form-control">
+      </div>
+      <div>
+        <label class="modal-label" style="font-size:12px">结束日期</label>
+        <input id="fEnd" type="date" class="form-control">
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="loadList()"><i class="bi bi-search"></i> 查询</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="resetFilter()">重置</button>
+    </div>
+
+    <div class="table-responsive" style="margin-top:12px">
+      <table class="table table-hover">
+        <thead><tr><th>时间</th><th>操作人</th><th>模块</th><th>操作</th><th>对象</th><th>详情</th><th>IP</th></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const MODULE_BADGE = {
+  '员工':'badge-in-service', '合同':'badge-priority-mid', '附件':'badge-priority-high',
+  '待办':'badge-priority-low', '账号':'badge-active', '字典':'badge-terminated', '五险一金':'badge-expired'
+};
+
+async function loadList(){
+  const params = new URLSearchParams();
+  const m = document.getElementById('fModule').value; if(m) params.set('module', m);
+  const a = document.getElementById('fAction').value; if(a) params.set('action', a);
+  const op = document.getElementById('fOperator').value.trim(); if(op) params.set('operator', op);
+  const kw = document.getElementById('fKeyword').value.trim(); if(kw) params.set('keyword', kw);
+  const s = document.getElementById('fStart').value; if(s) params.set('start', s);
+  const e = document.getElementById('fEnd').value; if(e) params.set('end', e);
+
+  const data = await api('/api/logs?' + params.toString());
+  if(!data) return;
+  const tb = document.getElementById('listBody');
+  if(data.items.length===0){ tb.innerHTML='<tr><td colspan="7" class="empty">暂无操作记录</td></tr>'; return; }
+  tb.innerHTML = data.items.map(r=>`
+    <tr>
+      <td style="white-space:nowrap;font-size:12px;color:#6b7280">${esc(r.created_at)}</td>
+      <td style="white-space:nowrap">
+        <div style="font-weight:500">${esc(r.operator_name||r.operator)}</div>
+        <div style="font-size:11px;color:#9ca3af">${esc(r.operator)}</div>
+      </td>
+      <td><span class="badge-status ${MODULE_BADGE[r.module]||'badge-priority-mid'}">${esc(r.module)}</span></td>
+      <td><span style="font-weight:500;color:${r.action==='删除'||r.action==='离职'?'#ef4444':'#2c5aa0'}">${esc(r.action)}</span></td>
+      <td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.target)}">${esc(r.target)||'-'}</td>
+      <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:#6b7280" title="${esc(r.detail)}">${esc(r.detail)||'-'}</td>
+      <td style="font-size:12px;color:#9ca3af">${esc(r.ip)||'-'}</td>
+    </tr>`).join('');
+}
+
+function resetFilter(){
+  document.getElementById('fModule').value='';
+  document.getElementById('fAction').value='';
+  document.getElementById('fOperator').value='';
+  document.getElementById('fKeyword').value='';
+  document.getElementById('fStart').value='';
+  document.getElementById('fEnd').value='';
+  loadList();
+}
+
+document.getElementById('fOperator').addEventListener('keydown', e=>{ if(e.key==='Enter') loadList(); });
+document.getElementById('fKeyword').addEventListener('keydown', e=>{ if(e.key==='Enter') loadList(); });
+
+loadList();
+</script>
+{% endblock %}

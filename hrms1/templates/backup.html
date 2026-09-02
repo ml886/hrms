@@ -1,0 +1,120 @@
+{% extends 'base.html' %}
+{% block page_title %}数据备份{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <h5 style="margin:0 0 16px;font-weight:700"><i class="bi bi-database-check" style="color:#2c5aa0"></i> 数据备份与恢复</h5>
+
+    <!-- 当前数据库信息 -->
+    <div id="dbInfo" style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:16px;margin-bottom:20px">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+        <i class="bi bi-hdd" style="color:#2c5aa0;font-size:18px"></i>
+        <span style="font-weight:600;color:#374151">当前数据库状态</span>
+      </div>
+      <div class="row g-3" id="dbStats">
+        <div class="text-muted" style="font-size:13px">加载中...</div>
+      </div>
+    </div>
+
+    <!-- 导出备份 -->
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+      <h6 style="font-weight:700;color:#2c5aa0;margin-bottom:10px"><i class="bi bi-download"></i> 导出备份</h6>
+      <p style="color:#6b7280;font-size:13px;margin-bottom:12px">导出当前系统<b>全部数据</b>为备份整包（.zip）：包含全局库（用户 / 公司 / 系统设置 / 待办）与各公司账套库（<b>员工信息 / 合同 / 社保明细 / 工资含绩效工资 / 转岗记录 / 字典设置</b>），以及<b>上传文件</b>（员工照片 / 附件 / 公司 Logo）。可用于完整存档或迁移。</p>
+      {% if can_manage_module('backup') %}
+      <a href="/api/backup/export" class="btn btn-primary btn-sm"><i class="bi bi-download"></i> 导出数据备份</a>
+      {% else %}
+      <span class="text-muted" style="font-size:13px">当前账号仅有查看权限，无导出/恢复权限。</span>
+      {% endif %}
+    </div>
+
+    <!-- 导入恢复 -->
+    <div style="border:1px solid #e5e7eb;border-radius:8px;padding:20px;margin-bottom:16px">
+      <h6 style="font-weight:700;color:#2c5aa0;margin-bottom:10px"><i class="bi bi-upload"></i> 导入恢复</h6>
+      <p style="color:#6b7280;font-size:13px;margin-bottom:12px">上传备份文件恢复数据。<b style="color:#ef4444">注意：恢复操作将覆盖当前全部数据，导入前会自动备份当前整套数据库。</b>支持新版 .zip 整包与旧版单库 .db 备份。</p>
+      <div style="border:2px dashed #cbd5e1;border-radius:8px;padding:24px;text-align:center;cursor:pointer" onclick="document.getElementById('backupFile').click()">
+        <i class="bi bi-cloud-upload" style="font-size:32px;color:#9ca3af"></i>
+        <div style="margin-top:8px;color:#6b7280;font-size:13px">点击选择备份文件（.zip / .db / .sqlite / .sqlite3）</div>
+        <div id="backupFileName" style="margin-top:6px;font-weight:600;color:#2c5aa0;font-size:13px"></div>
+      </div>
+      <input type="file" id="backupFile" accept=".zip,.db,.sqlite,.sqlite3" style="display:none">
+      <div class="mt-3">
+        {% if can_manage_module('backup') %}
+        <button class="btn btn-danger btn-sm" onclick="doRestore()" id="restoreBtn"><i class="bi bi-arrow-repeat"></i> 确认恢复数据</button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="alert alert-warning" style="font-size:13px">
+      <i class="bi bi-exclamation-triangle"></i> <b>温馨提示：</b>建议定期导出备份；恢复数据后需重新登录系统。
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let backupFile = null;
+
+async function loadDbInfo(){
+  const data = await api('/api/backup/info');
+  if(!data) return;
+  const fmtSize = (n) => {
+    if(n >= 1024*1024) return (n/1024/1024).toFixed(2)+' MB';
+    if(n >= 1024) return (n/1024).toFixed(1)+' KB';
+    return n+' B';
+  };
+  const stats = data.stats || {};
+  const statHtml = Object.entries(stats).map(([k,v])=>`
+    <div class="col-4 mb-2">
+      <div style="background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:10px 12px;text-align:center">
+        <div style="font-size:22px;font-weight:700;color:#2c5aa0">${v}</div>
+        <div style="font-size:12px;color:#6b7280">${k}</div>
+      </div>
+    </div>`).join('');
+  const dbFiles = (data.db_files || []).join('、') || '无';
+  document.getElementById('dbStats').innerHTML = `
+    <div class="col-12 mb-3" style="font-size:13px;color:#374151">
+      <span style="color:#6b7280">备份整包大小：</span><b>${fmtSize(data.size)}</b>
+      <span style="color:#6b7280;margin-left:16px">最后更新：</span><b>${data.mtime}</b>
+      <span style="color:#6b7280;margin-left:16px">公司账套库：</span><b>${data.company_db_count || 0}</b> 个${(data.company_dbs||[]).length ? '（' + (data.company_dbs||[]).join('、') + '）' : ''}
+    </div>
+    <div class="col-12 mb-3" style="font-size:13px;color:#374151">
+      <span style="color:#6b7280">包含数据库文件：</span><b>${dbFiles}</b>
+      <span style="color:#9ca3af;font-size:12px;margin-left:6px">（data.db 为全局库，company_core.db 为系统兜底库）</span>
+    </div>
+    <div class="col-12 mb-3" style="font-size:13px;color:#374151">
+      <span style="color:#6b7280">上传文件（照片/附件/Logo）：</span><b>${data.upload_files || 0}</b> 个
+    </div>
+    ${statHtml}
+  `;
+}
+
+document.getElementById('backupFile').addEventListener('change', function(){
+  if(this.files.length){
+    backupFile = this.files[0];
+    document.getElementById('backupFileName').textContent = backupFile.name;
+  }
+});
+
+async function doRestore(){
+  if(!backupFile){ showToast('请先选择备份文件','error'); return; }
+  confirmAction('确定要恢复数据吗？此操作将覆盖当前全部数据！', async ()=>{
+    const btn = document.getElementById('restoreBtn');
+    const oldHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 恢复中...';
+    const fd = new FormData();
+    fd.append('file', backupFile);
+    const r = await fetch('/api/backup/import', {method:'POST', body:fd});
+    const data = await r.json().catch(()=>({}));
+    btn.disabled = false;
+    btn.innerHTML = oldHtml;
+    if(!r.ok){ showToast(data.error||'恢复失败','error'); return; }
+    showToast('数据恢复成功，即将重新登录...','success');
+    setTimeout(()=>{ location.href = '/logout'; }, 2000);
+  }, true);
+}
+
+loadDbInfo();
+</script>
+{% endblock %}

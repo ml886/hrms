@@ -1,0 +1,544 @@
+{% extends 'base.html' %}
+{% block page_title %}工资明细查询{% endblock %}
+{% block content %}
+<style>
+.salary-wrap{max-width:100%}
+.page-bar{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px}
+.page-bar .title{display:flex;align-items:center;gap:10px;font-size:20px;font-weight:700;color:#1f2937}
+.page-bar .title i{color:#2c5aa0}
+.filter-card{background:#fff;border:1px solid #eef2f7;border-radius:12px;padding:14px 16px;margin-bottom:16px;
+  box-shadow:0 1px 2px rgba(16,24,40,.04)}
+.filter-card .row{--bs-gutter-y:10px}
+.salary-table{table-layout:auto;min-width:1200px;width:auto}
+.salary-table th,.salary-table td{white-space:nowrap;text-align:center;padding:9px 12px;font-size:13px}
+.salary-table td.num{text-align:right;font-variant-numeric:tabular-nums}
+.salary-table thead tr th{background:#2c5aa0;color:#fff;font-weight:600;vertical-align:middle;position:sticky;top:0}
+.salary-table thead tr th{cursor:pointer;user-select:none}
+.salary-table thead tr th:hover{background:#3566b5}
+.salary-table thead tr th.sorted{background:#1e3f73;box-shadow:inset 0 -2px 0 #ffd166}
+.salary-table tbody tr:nth-child(even){background:#f8fafc}
+.salary-table td.idx{color:#6b7280;font-variant-numeric:tabular-nums}
+.salary-table tbody tr:hover{background:#eef4fc}
+.unit-block{margin:0;border-bottom:1px solid #eef2f7}
+.unit-block:last-child{border-bottom:none}
+.unit-title-bar{background:#eef2f7;color:#2c5aa0;font-weight:700;font-size:13px;padding:9px 14px;
+  text-align:left;position:sticky;left:0;z-index:1;border-bottom:1px solid #e2e8f0}
+.unit-block .salary-table{table-layout:auto;min-width:1000px;width:auto;margin:0}
+.unit-block .salary-table thead tr th{position:static}
+.unit-block .salary-table td.op{width:1%;white-space:nowrap}
+.page-item.active .page-link{background:#2c5aa0;border-color:#2c5aa0}
+.pagination-info{font-size:13px;color:#6b7280}
+.horiz-scroll::-webkit-scrollbar{height:10px}
+.horiz-scroll::-webkit-scrollbar-thumb{background:#c7d2e0;border-radius:5px}
+.horiz-scroll::-webkit-scrollbar-track{background:#f1f5f9}
+.list-card{background:#fff;border:1px solid #eef2f7;border-radius:12px;box-shadow:0 1px 2px rgba(16,24,40,.04);overflow:hidden}
+.empty{text-align:center;color:#9ca3af;padding:40px 0;font-size:14px}
+.unit-check-list{max-height:260px;overflow:auto;min-width:240px}
+.unit-check-list .form-check{margin-bottom:2px}
+.unit-check-list .form-check-label{cursor:pointer}
+.badge-unmatched{background:#fef3c7;color:#92400e;font-weight:600;font-size:11px;padding:2px 6px;border-radius:6px}
+</style>
+
+<div class="salary-wrap">
+  <!-- 页面标题与操作 -->
+  <div class="page-bar">
+    <div class="title"><i class="bi bi-cash-stack"></i> 工资明细查询</div>
+      <div class="d-flex gap-2 flex-wrap">
+      <button class="btn btn-primary btn-sm" onclick="openImportModal()"><i class="bi bi-upload"></i> 导入明细</button>
+      <button class="btn btn-outline-primary btn-sm" onclick="doExport()"><i class="bi bi-file-earmark-excel"></i> 导出汇总明细表</button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="rematchUnits()"><i class="bi bi-link"></i> 按员工信息匹配客户单位</button>
+      <button class="btn btn-outline-danger btn-sm" onclick="openDelModal()"><i class="bi bi-trash3"></i> 批量删除</button>
+    </div>
+  </div>
+
+  <!-- 筛选区 -->
+  <div class="filter-card">
+    <div class="row align-items-end g-2">
+      <div class="col-auto">
+        <label class="modal-label mb-1">期间</label>
+        <select id="fPeriod" class="form-select form-select-sm" style="width:auto" onchange="goPage(1)"></select>
+      </div>
+      <div class="col-auto">
+        <label class="modal-label mb-1">客户单位（可单选/多选）</label>
+        <div class="dropdown">
+          <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle" id="unitFilterBtn"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+            客户单位：<span id="unitFilterLabel">全部</span>
+          </button>
+          <div class="dropdown-menu p-2">
+            <div class="d-flex justify-content-between mb-2 px-1">
+              <span class="small text-muted">客户单位（可多选）</span>
+              <span>
+                <a href="javascript:void(0)" class="small" onclick="unitSetAll(true,'filter')">全选</a>
+                <span class="text-muted">·</span>
+                <a href="javascript:void(0)" class="small" onclick="unitSetAll(false,'filter')">清空</a>
+              </span>
+            </div>
+            <div id="unitFilterList" class="unit-check-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="col-auto" style="flex:1;min-width:200px">
+        <label class="modal-label mb-1">姓名 / 身份证号</label>
+        <input id="fKeyword" class="form-control form-control-sm" placeholder="输入关键字后回车或点查询" onkeydown="if(event.key==='Enter'){goPage(1)}">
+      </div>
+      <div class="col-auto">
+        <button class="btn btn-primary btn-sm" onclick="goPage(1)"><i class="bi bi-search"></i> 查询</button>
+        <span class="text-muted ms-2" style="font-size:13px">共 <b id="totalCount">0</b> 条</span>
+      </div>
+    </div>
+    <div class="small text-muted mt-2">默认显示：最近月份 + 排序第一的客户单位；如需查看其他，请手动选择月份、客户单位或输入姓名/身份证号。</div>
+  </div>
+
+  <!-- 列表（按客户单位分组，每组按其导入/校验表格的实际列展示） -->
+  <div class="list-card">
+    <div class="table-responsive horiz-scroll" id="tableScroll">
+      <div id="listBody"></div>
+    </div>
+    <!-- 分页 -->
+    <div class="d-flex justify-content-between align-items-center p-3 flex-wrap gap-2" id="pagerBox">
+      <div class="pagination-info">共 <b id="pgTotal">0</b> 条 · 第 <b id="pgCur">0</b>/<span id="pgPages">0</span> 页</div>
+      <div class="d-flex align-items-center gap-2">
+        <label style="font-size:13px;color:#6b7280;margin:0">每页
+          <select id="pgSize" onchange="changePageSize()" style="font-size:13px">
+            <option value="10" selected>10</option><option value="20">20</option>
+            <option value="50">50</option><option value="100">100</option>
+          </select> 条
+        </label>
+        <ul class="pagination pagination-sm mb-0" id="pgButtons"></ul>
+        <label style="font-size:13px;color:#6b7280;margin:0">跳至
+          <input type="number" id="pgJump" min="1" style="width:60px;font-size:13px" value="1"> 页
+        </label>
+        <button class="btn btn-outline-primary btn-sm" onclick="jumpPage()">跳转</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 导入工资明细弹窗 -->
+<div class="modal fade" id="impModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="border-bottom:none;padding-bottom:0">
+        <h6 class="modal-title"><i class="bi bi-upload"></i> 导入工资明细</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="modal-label">① 下载导入模板</label>
+        <p style="font-size:13px;color:#6b7280">模板包含全部列：序号、员工姓名、身份证号、期间、基本工资、岗位工资、绩效工资、津贴补贴、加班工资、奖金、应发工资、社保个人、公积金个人、个税、扣款合计、实发工资、备注。</p>
+        <a href="/api/salary/template" class="btn btn-outline-primary btn-sm"><i class="bi bi-download"></i> 下载工资汇总明细导入模板</a>
+        <hr>
+        <label class="modal-label">② 期间（可留空，优先取表格内"期间"列）</label>
+        <input type="text" id="impPeriod" class="form-control form-control-sm" placeholder="YYYY-MM，如 2026-08">
+        <label class="modal-label mt-3">③ 选择文件（Excel / CSV）</label>
+        <input type="file" id="impFile" class="form-control form-control-sm" accept=".xlsx,.xls,.csv">
+        <p style="font-size:12px;color:#6b7280;margin-top:8px">按身份证号匹配员工；如为<b>脱敏格式</b>（如 532224********1125），则按<b>姓名 + 未脱敏部分号码</b>匹配（需唯一匹配）。同一员工同一期间重复导入会覆盖更新。客户单位自动取匹配员工的「所在单位」，未匹配员工保留表格内单位值，可稍后手动维护。</p>
+      </div>
+      <div class="modal-footer" style="border-top:none;padding-top:0">
+        <button class="btn btn-primary btn-sm" onclick="doImport()"><i class="bi bi-check-lg"></i> 开始导入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 批量删除弹窗 -->
+<div class="modal fade" id="delModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="border-bottom:none;padding-bottom:0">
+        <h6 class="modal-title"><i class="bi bi-trash3"></i> 批量删除工资明细</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="modal-label">① 选择月份（可留空 = 全部月份）</label>
+        <select id="delPeriod" class="form-select form-select-sm" onchange="updateDelCount()"></select>
+        <label class="modal-label mt-3">② 选择客户单位（可多选，留空 = 全部客户单位）</label>
+        <div class="dropdown">
+          <button type="button" class="btn btn-outline-secondary btn-sm dropdown-toggle w-100 text-start"
+                  data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+            客户单位：<span id="delUnitLabel">全部</span>
+          </button>
+          <div class="dropdown-menu p-2">
+            <div class="d-flex justify-content-between mb-2 px-1">
+              <span class="small text-muted">客户单位（可多选）</span>
+              <span>
+                <a href="javascript:void(0)" class="small" onclick="unitSetAll(true,'del')">全选</a>
+                <span class="text-muted">·</span>
+                <a href="javascript:void(0)" class="small" onclick="unitSetAll(false,'del')">清空</a>
+              </span>
+            </div>
+            <div id="unitDelList" class="unit-check-list"></div>
+          </div>
+        </div>
+        <div class="alert alert-warning mt-3 mb-0 py-2" style="font-size:13px">
+          将删除 <b id="delCount">0</b> 条工资明细（含其个税数据）。删除前将再次确认。
+        </div>
+      </div>
+      <div class="modal-footer" style="border-top:none;padding-top:0">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-danger btn-sm" onclick="confirmBatchDelete()"><i class="bi bi-trash3"></i> 确认删除</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 手动编辑工资明细弹窗 -->
+<div class="modal fade" id="editModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header" style="border-bottom:none;padding-bottom:0">
+        <h6 class="modal-title"><i class="bi bi-pencil"></i> 维护工资明细</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="editHint" class="alert alert-warning py-2 mb-3" style="font-size:13px;display:none">
+          该人员未匹配到员工信息，请手动维护客户单位 / 姓名 / 身份证号；维护正确身份证号后可自动匹配员工。
+        </div>
+        <label class="modal-label">客户单位</label>
+        <input id="editClientUnit" class="form-control form-control-sm" list="unitDatalist" placeholder="如与代码字段一致可直接选择">
+        <label class="modal-label mt-3">姓名</label>
+        <input id="editName" class="form-control form-control-sm">
+        <label class="modal-label mt-3">身份证号</label>
+        <input id="editIdCard" class="form-control form-control-sm">
+        <label class="modal-label mt-3">期间（YYYY-MM）</label>
+        <input id="editPeriod" class="form-control form-control-sm">
+        <label class="modal-label mt-3">备注</label>
+        <input id="editRemark" class="form-control form-control-sm">
+        <datalist id="unitDatalist"></datalist>
+      </div>
+      <div class="modal-footer" style="border-top:none;padding-top:0">
+        <button class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button class="btn btn-primary btn-sm" onclick="saveEdit()"><i class="bi bi-check-lg"></i> 保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allItems = [];
+let pgCurrent = 1;
+let pgPageSize = 10;
+let pgTotal = 0;
+let filterUnits = [];   // 当前筛选选中的客户单位
+let delUnits = [];      // 批量删除选中的客户单位
+let editId = null;
+let __units = [];       // 客户单位选项（关联代码字段）
+let __periods = [];     // 期间选项
+let sortCol = null;     // 当前排序列（表头列名）；null=未指定（按后端默认/姓名）
+let sortDir = 1;        // 1=升序，-1=降序
+
+function esc(s){
+  return String(s==null?'':s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function isNum(v){ return v!=='' && v!=null && !isNaN(Number(v)) && isFinite(Number(v)); }
+
+// ---------- 客户单位多选 ----------
+function renderUnitChecks(listId, selected, options){
+  const box = document.getElementById(listId);
+  if(!options || !options.length){ box.innerHTML = '<div class="px-1 small text-muted">暂无客户单位</div>'; return; }
+  box.innerHTML = options.map((u,i)=>`<div class="form-check"><input class="form-check-input" type="checkbox" id="${listId}_${i}" data-u="${esc(u)}" ${selected.includes(u)?'checked':''} onchange="unitToggle('${listId}')"><label class="form-check-label small" for="${listId}_${i}">${esc(u)}</label></div>`).join('');
+}
+function unitToggle(listId){
+  const box = document.getElementById(listId);
+  const sel = [...box.querySelectorAll('input[type=checkbox]')].filter(c=>c.checked).map(c=>c.dataset.u);
+  if(listId==='unitFilterList'){ filterUnits = sel; updateUnitFilterLabel(); goPage(1); }
+  else if(listId==='unitDelList'){ delUnits = sel; updateDelLabel(); updateDelCount(); }
+}
+function unitSetAll(state, which){
+  const listId = which==='filter' ? 'unitFilterList' : 'unitDelList';
+  document.getElementById(listId).querySelectorAll('input[type=checkbox]').forEach(c=>c.checked=state);
+  unitToggle(listId);
+}
+function updateUnitFilterLabel(){
+  const lbl = document.getElementById('unitFilterLabel');
+  if(!filterUnits.length) lbl.textContent='全部';
+  else if(filterUnits.length===1) lbl.textContent=filterUnits[0];
+  else lbl.textContent=`已选 ${filterUnits.length} 个`;
+}
+function updateDelLabel(){
+  const lbl = document.getElementById('delUnitLabel');
+  if(!delUnits.length) lbl.textContent='全部';
+  else if(delUnits.length===1) lbl.textContent=delUnits[0];
+  else lbl.textContent=`已选 ${delUnits.length} 个`;
+}
+function refreshDatalist(){
+  document.getElementById('unitDatalist').innerHTML = __units.map(u=>`<option value="${esc(u)}">`).join('');
+}
+
+// ---------- 初始化（默认视图：最近月份 + 排序第一客户单位）----------
+async function boot(){
+  const data = await api('/api/salary/records?page=1&size=1');
+  if(!data) return;
+  __units = data.units || [];
+  __periods = data.periods || [];
+  document.getElementById('fPeriod').innerHTML = '<option value="">全部期间</option>' + __periods.map(p=>`<option value="${p}">${p}</option>`).join('');
+  document.getElementById('fPeriod').value = data.default_period || '';
+  filterUnits = data.default_unit ? [data.default_unit] : [];
+  renderUnitChecks('unitFilterList', filterUnits, __units);
+  updateUnitFilterLabel();
+  refreshDatalist();
+  goPage(1);
+}
+
+async function loadSalary(){
+  const period = document.getElementById('fPeriod').value;
+  const kw = document.getElementById('fKeyword').value.trim();
+  const units = filterUnits.join(',');
+  const data = await api(`/api/salary/records?period=${encodeURIComponent(period)}&keyword=${encodeURIComponent(kw)}&units=${encodeURIComponent(units)}&page=${pgCurrent}&size=${pgPageSize}`);
+  if(!data) return;
+  allItems = data.items || [];
+  pgTotal = data.total;
+  document.getElementById('totalCount').textContent = data.total;
+  // 同步最新选项（保留当前选择）
+  __units = data.units || __units;
+  __periods = data.periods || __periods;
+  const curP = document.getElementById('fPeriod').value;
+  document.getElementById('fPeriod').innerHTML = '<option value="">全部期间</option>' + __periods.map(p=>`<option value="${p}">${p}</option>`).join('');
+  if(__periods.includes(curP)) document.getElementById('fPeriod').value = curP;
+  filterUnits = filterUnits.filter(u=>__units.includes(u));
+  renderUnitChecks('unitFilterList', filterUnits, __units);
+  updateUnitFilterLabel();
+  refreshDatalist();
+  renderPage();
+}
+
+// 分组使用的列：取组内各记录「导入/校验表格」原始表头的并集（按首次出现顺序）
+function groupColumns(rows){
+  const cols = []; const seen = new Set();
+  for(const d of rows){
+    const hs = (d.headers && d.headers.length) ? d.headers : Object.keys(d.values||{});
+    for(const h of hs){
+      if(!seen.has(h)){ seen.add(h); cols.push(h); }
+    }
+  }
+  return cols;
+}
+
+function unitKey(d){ return (d.client_unit || d.department || '').trim() || '未归客户单位'; }
+
+function renderPage(){
+  const box = document.getElementById('listBody');
+  if(!allItems || allItems.length===0){
+    box.innerHTML = '<div class="empty">暂无数据（可调整月份 / 客户单位后查询，或导入明细）</div>';
+    document.getElementById('pagerBox').style.display='none';
+    return;
+  }
+  document.getElementById('pagerBox').style.display='';
+  let html = '';
+  let i = 0;
+  // 默认按「序号」列升序排列（点击其他表头可切换排序列）
+  if(!sortCol){ sortCol = '序号'; sortDir = 1; }
+  while(i < allItems.length){
+    const u = unitKey(allItems[i]);
+    let grp = [];
+    while(i < allItems.length && unitKey(allItems[i]) === u){ grp.push(allItems[i]); i++; }
+    let cols = groupColumns(grp);
+    // 确保存在「序号」列（无则前置），用于按显示顺序动态连续编号
+    if(!cols.includes('序号')) cols = ['序号', ...cols];
+    // 组内按当前排序列排序（保持分组结构不变）
+    if(cols.includes(sortCol)) grp = sortRows(grp, sortCol, sortDir);
+    // 按当前显示顺序写入连续序号 1、2、3、4、5、6…，始终顺序编号
+    grp.forEach((d, idx)=>{ d.values = d.values || {}; d.values['序号'] = idx + 1; });
+    html += `<div class="unit-block">`;
+    html += `<table class="salary-table"><thead><tr>`;
+    html += cols.map(c=>{
+      const active = (c===sortCol);
+      const arrow = active ? (sortDir===1 ? ' ▲' : ' ▼') : '';
+      const cls = active ? ' class="sorted"' : '';
+      return `<th${cls} data-col="${esc(c)}" title="点击按该列排序" onclick="sortBy(this)">${esc(c)}${arrow}</th>`;
+    }).join('');
+    html += `<th>操作</th></tr></thead><tbody>`;
+    html += grp.map(d=>renderRow(d, cols)).join('');
+    html += `</tbody></table></div>`;
+  }
+  box.innerHTML = html;
+  renderPager();
+}
+
+// 取某行在指定列的值（结构化姓名字段也纳入）
+function cellValue(d, col){
+  if(col==='__name__') return d.name || '';
+  const v = d.values ? d.values[col] : undefined;
+  return (v===undefined || v===null) ? '' : v;
+}
+// 组内排序：数值按数值大小，文本按中文/字典序；dir=1 升序，-1 降序
+function sortRows(rows, col, dir){
+  return rows.slice().sort((a,b)=>{
+    const sa = String(cellValue(a,col) ?? '');
+    const sb = String(cellValue(b,col) ?? '');
+    const na = parseFloat(sa), nb = parseFloat(sb);
+    const bothNum = sa!=='' && sb!=='' && !isNaN(na) && !isNaN(nb) && /[0-9]/.test(sa) && /[0-9]/.test(sb);
+    if(bothNum) return (na - nb) * dir;
+    return sa.localeCompare(sb, 'zh-Hans-CN') * dir;
+  });
+}
+// 点击表头排序：同列再次点击切换升降序，异列则按该列升序
+function sortBy(th){
+  const col = th.dataset.col;
+  if(col===sortCol) sortDir = -sortDir;
+  else { sortCol = col; sortDir = 1; }
+  renderPage();
+}
+
+function renderRow(d, cols){
+  const vals = d.values || {};
+  let html = cols.map(c=>{
+    let v = vals[c];
+    if(v===undefined || v===null) v='';
+    if(c==='序号'){ return `<td class="idx">${esc(v)}</td>`; }
+    if(isNum(v)){
+      return `<td class="num">${esc(Number(v))}</td>`;
+    }
+    return `<td>${esc(v)||'-'}</td>`;
+  }).join('');
+  const unmatched = d.matched ? '' : `<span class="badge-unmatched d-block mb-1">未匹配</span>`;
+  html += `<td class="op">${unmatched}<div class="d-flex gap-1 justify-content-center"><button class="btn btn-sm btn-outline-secondary" onclick="openEdit(${d.id})" title="维护"><i class="bi bi-pencil"></i></button><button class="btn btn-sm btn-outline-danger" onclick="delRow(${d.id})" title="删除"><i class="bi bi-trash"></i></button></div></td>`;
+  return `<tr>${html}</tr>`;
+}
+
+function renderPager(){
+  const totalPages = Math.max(1, Math.ceil(pgTotal / pgPageSize));
+  document.getElementById('pagerBox').style.display='';
+  document.getElementById('pgTotal').textContent = pgTotal;
+  document.getElementById('pgCur').textContent = pgCurrent;
+  document.getElementById('pgPages').textContent = totalPages;
+  document.getElementById('pgJump').value = pgCurrent;
+  let btn=''; const page=pgCurrent;
+  let start=Math.max(1,page-2), end=Math.min(totalPages,page+2);
+  btn += `<li class="page-item ${page<=1?'disabled':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${page-1})">&laquo;</a></li>`;
+  if(start>1) btn += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goPage(1)">1</a></li>`;
+  if(start>2) btn += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+  for(let i=start;i<=end;i++) btn += `<li class="page-item ${i===page?'active':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${i})">${i}</a></li>`;
+  if(end<totalPages-1) btn += `<li class="page-item disabled"><span class="page-link">…</span></li>`;
+  if(end<totalPages) btn += `<li class="page-item"><a class="page-link" href="javascript:void(0)" onclick="goPage(${totalPages})">${totalPages}</a></li>`;
+  btn += `<li class="page-item ${page>=totalPages?'disabled':''}"><a class="page-link" href="javascript:void(0)" onclick="goPage(${page+1})">&raquo;</a></li>`;
+  document.getElementById('pgButtons').innerHTML = btn;
+}
+
+function goPage(p){
+  const totalPages = Math.max(1, Math.ceil(pgTotal / pgPageSize));
+  if(p<1||p>totalPages) return;
+  pgCurrent=p; loadSalary();
+}
+function jumpPage(){ const v=parseInt(document.getElementById('pgJump').value); if(v) goPage(v); }
+function changePageSize(){ pgPageSize=parseInt(document.getElementById('pgSize').value); pgCurrent=1; loadSalary(); }
+
+// ===== 删除单条 =====
+async function delRow(id){
+  confirmAction('确定删除该条工资明细？', async ()=>{
+    const r = await api('/api/salary/'+id, {method:'DELETE'});
+    if(!r) return;
+    showToast('已删除','success');
+    loadSalary();
+  }, true);
+}
+
+// ===== 批量删除 =====
+async function openDelModal(){
+  document.getElementById('delPeriod').innerHTML = '<option value="">全部月份</option>' + __periods.map(p=>`<option value="${p}">${p}</option>`).join('');
+  delUnits = [];
+  renderUnitChecks('unitDelList', delUnits, __units);
+  updateDelLabel();
+  document.getElementById('delCount').textContent = '0';
+  updateDelCount();
+  new bootstrap.Modal(document.getElementById('delModal')).show();
+}
+async function updateDelCount(){
+  const period = document.getElementById('delPeriod').value;
+  const units = delUnits.join(',');
+  const data = await api(`/api/salary/records?page=1&size=1&period=${encodeURIComponent(period)}&units=${encodeURIComponent(units)}`);
+  if(!data) return;
+  document.getElementById('delCount').textContent = data.total;
+  window.__delPeriod = period; window.__delUnits = delUnits.slice();
+}
+async function confirmBatchDelete(){
+  const period = window.__delPeriod || '';
+  const units = window.__delUnits || [];
+  const cnt = document.getElementById('delCount').textContent;
+  const scope = (period||'全部月份') + '，客户单位：' + (units.length? units.join('、') : '全部');
+  confirmAction(`确定删除 ${scope} 的 ${cnt} 条工资明细？此操作不可恢复！`, async ()=>{
+    const r = await api('/api/salary/batch-delete', {method:'POST', body:{period, units}});
+    if(!r) return;
+    showToast(r.msg || '已删除', 'success');
+    bootstrap.Modal.getInstance(document.getElementById('delModal')).hide();
+    boot();
+  }, true);
+}
+
+// ===== 按员工信息匹配客户单位 =====
+async function rematchUnits(){
+  confirmAction('将已匹配员工的工资明细「客户单位」按员工所在单位重新对齐（未匹配记录不改动）。确定？', async ()=>{
+    const r = await api('/api/salary/rematch-units', {method:'POST'});
+    if(!r) return;
+    showToast(r.msg || '已更新', 'success');
+    loadSalary();
+  }, true);
+}
+
+// ===== 手动维护（编辑）=====
+function openEdit(id){
+  const d = allItems.find(x=>x.id===id);
+  if(!d) return;
+  editId = id;
+  document.getElementById('editClientUnit').value = d.client_unit||'';
+  document.getElementById('editName').value = d.name||'';
+  document.getElementById('editIdCard').value = d.id_card||'';
+  document.getElementById('editPeriod').value = d.period||'';
+  document.getElementById('editRemark').value = d.remark||'';
+  document.getElementById('editHint').style.display = d.matched ? 'none' : '';
+  new bootstrap.Modal(document.getElementById('editModal')).show();
+}
+async function saveEdit(){
+  const body = {
+    client_unit: document.getElementById('editClientUnit').value.trim(),
+    name: document.getElementById('editName').value.trim(),
+    id_card: document.getElementById('editIdCard').value.trim(),
+    period: document.getElementById('editPeriod').value.trim(),
+    remark: document.getElementById('editRemark').value.trim(),
+  };
+  const r = await api('/api/salary/'+editId, {method:'PUT', body});
+  if(!r) return;
+  showToast(r.msg || '已更新', 'success');
+  bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+  loadSalary();
+}
+
+// ===== 导入 =====
+function openImportModal(){
+  document.getElementById('impPeriod').value = new Date().toISOString().slice(0,7);
+  document.getElementById('impFile').value = '';
+  new bootstrap.Modal(document.getElementById('impModal')).show();
+}
+async function doImport(){
+  const file = document.getElementById('impFile').files[0];
+  if(!file){ showToast('请先选择文件','error'); return; }
+  const period = document.getElementById('impPeriod').value.trim();
+  const fd = new FormData();
+  fd.append('file', file);
+  if(period) fd.append('period', period);
+  showToast('正在导入…');
+  const data = await api('/api/salary/import', {method:'POST', body:fd});
+  if(!data) return;
+  const extra = (data.unmatched && data.unmatched.length) ? `，未匹配员工 ${data.unmatched.length} 条（客户单位保留表格值，可手动维护）` : '';
+  showToast(data.msg + extra, (data.unmatched && data.unmatched.length) ? 'error' : 'success');
+  bootstrap.Modal.getInstance(document.getElementById('impModal')).hide();
+  boot();
+}
+
+// ===== 导出 =====
+function doExport(){
+  const period = document.getElementById('fPeriod').value;
+  const kw = document.getElementById('fKeyword').value.trim();
+  const units = filterUnits.join(',');
+  let url = '/api/salary/export?';
+  if(period) url += 'period='+encodeURIComponent(period)+'&';
+  if(units) url += 'units='+encodeURIComponent(units)+'&';
+  if(kw) url += 'keyword='+encodeURIComponent(kw)+'&';
+  location.href = url;
+}
+
+boot();
+</script>
+{% endblock %}

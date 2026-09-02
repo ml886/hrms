@@ -1,0 +1,161 @@
+{% extends 'base.html' %}
+{% block page_title %}代码字段维护{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-sliders"></i> 代码字段维护</h5>
+      {% if can_manage_module('dicts') %}
+      <button class="btn btn-primary btn-sm" onclick="openModal()"><i class="bi bi-plus-lg"></i> 新增选项</button>
+      {% endif %}
+    </div>
+    <div class="alert alert-info" style="font-size:13px">
+      维护员工信息中的下拉字典字段：<b>客户单位、职位、学历、政治面貌、民族、婚姻状况、合同类型</b> 等。新增的选项会实时应用到「员工信息管理」相关下拉框。
+    </div>
+    <div class="filter-bar">
+      <select id="fCategory" onchange="loadList()"><option value="">全部分类</option></select>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover">
+        <thead><tr><th>分类</th><th>选项值</th><th>排序</th><th>状态</th><th>备注</th><th>操作</th></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">选项信息</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="mId">
+        <div class="mb-3"><label class="modal-label">分类</label>
+          <select id="mCategory" class="form-select" onchange="onCatChange()">
+            <option value="">请选择分类</option>
+          </select>
+          <input id="mCategoryCustom" class="form-control mt-2" style="display:none" placeholder="请输入自定义分类名称">
+        </div>
+        <div class="mb-3"><label class="modal-label">选项值</label><input id="mLabel" class="form-control"></div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">排序（数字越小越靠前）</label><input id="mSort" type="number" class="form-control" value="0"></div>
+          <div class="col-6 mb-3"><label class="modal-label">状态</label>
+            <select id="mEnabled" class="form-select"><option value="1">启用</option><option value="0">停用</option></select></div>
+        </div>
+        <div class="mb-3"><label class="modal-label">备注</label><input id="mRemark" class="form-control"></div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-primary" onclick="save()">保存</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const canManageDicts = {{ 'true' if can_manage_module('dicts') else 'false' }};
+async function loadCats(){
+  const data = await api('/api/dicts/categories');
+  if(!data) return;
+  const sel = document.getElementById('fCategory');
+  const catSel = document.getElementById('mCategory');
+  // 顶部筛选下拉
+  sel.innerHTML = '<option value="">全部分类</option>' + data.items.map(c=>`<option value="${c}">${c}</option>`).join('');
+  // 弹窗分类下拉：仅展示接口返回的真实分类 + 自定义
+  const baseCats = data.items.slice();
+  let opts = '<option value="">请选择分类</option>' + baseCats.map(c=>`<option value="${c}">${c}</option>`).join('');
+  opts += '<option value="__custom__">➕ 自定义分类…</option>';
+  catSel.innerHTML = opts;
+}
+
+function onCatChange(){
+  const sel = document.getElementById('mCategory');
+  const custom = document.getElementById('mCategoryCustom');
+  if(sel.value==='__custom__'){ custom.style.display=''; custom.focus(); }
+  else { custom.style.display='none'; custom.value=''; }
+}
+
+async function loadList(){
+  const cat = document.getElementById('fCategory').value;
+  const data = await api('/api/dicts?category='+encodeURIComponent(cat));
+  if(!data) return;
+  const tb = document.getElementById('listBody');
+  if(data.items.length===0){ tb.innerHTML='<tr><td colspan="6" class="empty">暂无数据</td></tr>'; return; }
+  tb.innerHTML = data.items.map(d=>`
+    <tr>
+      <td><span class="badge-status badge-priority-mid">${d.category}</span></td>
+      <td style="font-weight:500">${d.label}</td>
+      <td>${d.sort}</td>
+      <td>${d.enabled?'<span class="badge-status badge-in-service">启用</span>':'<span class="badge-status badge-resigned">停用</span>'}</td>
+      <td>${d.remark||'-'}</td>
+      <td>${canManageDicts?`<button class="btn btn-outline-primary btn-sm me-1" onclick="edit(${d.id})">编辑</button>
+        <button class="btn btn-outline-danger btn-sm" onclick="del(${d.id})">删除</button>`:'-'}</td>
+    </tr>`).join('');
+}
+
+function openModal(){
+  document.getElementById('mId').value='';
+  document.getElementById('mCategory').value='';
+  document.getElementById('mCategoryCustom').value='';
+  document.getElementById('mCategoryCustom').style.display='none';
+  document.getElementById('mLabel').value='';
+  document.getElementById('mSort').value='0';
+  document.getElementById('mEnabled').value='1';
+  document.getElementById('mRemark').value='';
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+async function edit(id){
+  const data = await api('/api/dicts?');
+  if(!data) return;
+  const d = data.items.find(x=>x.id===id);
+  if(!d) return;
+  document.getElementById('mId').value=d.id;
+  const catSel = document.getElementById('mCategory');
+  // 确保该分类在选项中（自定义新增的分类可能不在列表里）
+  if(d.category && ![...catSel.options].some(o=>o.value===d.category)){
+    const opt = document.createElement('option');
+    opt.value = d.category; opt.textContent = d.category;
+    catSel.insertBefore(opt, catSel.querySelector('option[value="__custom__"]'));
+  }
+  catSel.value = d.category || '';
+  onCatChange();
+  document.getElementById('mLabel').value=d.label;
+  document.getElementById('mSort').value=d.sort;
+  document.getElementById('mEnabled').value=d.enabled?'1':'0';
+  document.getElementById('mRemark').value=d.remark;
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+function save(){
+  confirmAction('确定保存该字典选项吗？', ()=>{ doSave(); });
+}
+async function doSave(){
+  const id = document.getElementById('mId').value;
+  const catSel = document.getElementById('mCategory');
+  let category = catSel.value;
+  if(category==='__custom__') category = document.getElementById('mCategoryCustom').value.trim();
+  if(!category){ showToast('请选择或输入分类','error'); return; }
+  const body = {
+    category: category,
+    label: document.getElementById('mLabel').value,
+    sort: parseInt(document.getElementById('mSort').value)||0,
+    enabled: document.getElementById('mEnabled').value==='1',
+    remark: document.getElementById('mRemark').value,
+  };
+  if(id) await api('/api/dicts/'+id, {method:'PUT', body});
+  else await api('/api/dicts', {method:'POST', body});
+  bootstrap.Modal.getInstance(document.getElementById('modal')).hide();
+  loadCats().then(loadList);
+}
+
+function del(id){
+  confirmAction('确认删除该字典选项吗？', async ()=>{ await doDel(id); }, true);
+}
+async function doDel(id){
+  await api('/api/dicts/'+id, {method:'DELETE'});
+  loadCats().then(loadList);
+}
+
+loadCats().then(loadList);
+</script>
+{% endblock %}

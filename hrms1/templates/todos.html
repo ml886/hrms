@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+{% block page_title %}待办事项管理{% endblock %}
+{% block content %}
+<div class="card">
+  <div class="card-body">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 style="margin:0;font-weight:700"><i class="bi bi-list-check"></i> 我的待办</h5>
+      {% if can_manage_module('todos') %}
+      <button class="btn btn-primary btn-sm" onclick="openModal()"><i class="bi bi-plus-lg"></i> 新建待办</button>
+      {% endif %}
+    </div>
+    <div class="filter-bar">
+      <select id="fDone" onchange="loadList()">
+        <option value="">全部</option>
+        <option value="0" selected>未完成</option>
+        <option value="1">已完成</option>
+      </select>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover">
+        <thead><tr><th width="40"><input type="checkbox" id="checkAll" onchange="toggleAll(this)"></th><th>标题</th><th>截止日期</th><th>提醒时段</th><th>提醒进度</th><th>优先级</th><th>状态</th><th>操作</th></tr></thead>
+        <tbody id="listBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="modal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header"><h6 class="modal-title">待办信息</h6><button class="btn-close" data-bs-dismiss="modal"></button></div>
+      <div class="modal-body">
+        <input type="hidden" id="mId">
+        <div class="mb-3"><label class="modal-label">标题</label><input id="mTitle" class="form-control"></div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">截止日期</label><input type="date" id="mDue" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">提醒次数</label>
+            <select id="mCount" class="form-select">
+              <option value="1">1 次</option><option value="2">2 次</option>
+              <option value="3" selected>3 次</option><option value="5">5 次</option><option value="10">10 次</option>
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-6 mb-3"><label class="modal-label">提醒开始</label><input type="datetime-local" id="mStart" class="form-control"></div>
+          <div class="col-6 mb-3"><label class="modal-label">提醒结束</label><input type="datetime-local" id="mEnd" class="form-control"></div>
+        </div>
+        <div class="mb-3"><label class="modal-label">优先级</label>
+          <select id="mPriority" class="form-select"><option>高</option><option selected>中</option><option>低</option></select>
+        </div>
+        <div class="alert alert-info" style="font-size:12px">在「提醒开始 ~ 结束」时间段内，提醒次数将均匀分配、间隔弹出（不连续）；提前完成或删除待办即停止提醒。</div>
+      </div>
+      <div class="modal-footer"><button class="btn btn-secondary" data-bs-dismiss="modal">取消</button><button class="btn btn-primary" onclick="save()">保存</button></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const canManageTodos = {{ 'true' if can_manage_module('todos') else 'false' }};
+async function loadList(){
+  const done = document.getElementById('fDone').value;
+  const data = await api('/api/todos?done='+done);
+  if(!data) return;
+  const tb = document.getElementById('listBody');
+  if(data.items.length===0){ tb.innerHTML='<tr><td colspan="8" class="empty">暂无待办</td></tr>'; return; }
+  const today = new Date().toISOString().slice(0,10);
+  tb.innerHTML = data.items.map(t=>{
+    const overdue = !t.done && t.due_date < today;
+    const badge = t.priority==='高'?'badge-priority-high':t.priority==='中'?'badge-priority-mid':'badge-priority-low';
+    const dueClass = overdue ? 'level-red' : '';
+    const remindProg = t.remind_start ? `${t.reminded_count||0}/${t.remind_count||1}次` : '-';
+    return `<tr>
+      <td><input type="checkbox" ${t.done?'checked':''} onchange="toggleDone(${t.id}, this.checked)"></td>
+      <td style="${t.done?'text-decoration:line-through;color:#9ca3af':''}">${esc(t.title)}</td>
+      <td class="${dueClass}">${t.due_date}</td>
+      <td>${t.remind_start ? t.remind_start+' ~ '+t.remind_end : '-'}</td>
+      <td>${remindProg}</td>
+      <td><span class="badge-status ${badge}">${t.priority}</span></td>
+      <td>${t.done?'已完成':'<span style="color:#10b981">待办</span>'}</td>
+      <td>${canManageTodos?`<button class="btn btn-outline-primary btn-sm me-1" onclick="edit(${t.id})">编辑</button>
+        <button class="btn btn-outline-danger btn-sm" onclick="del(${t.id})">删除</button>`:'-'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openModal(id){
+  document.getElementById('mId').value='';
+  ['mTitle','mDue','mStart','mEnd'].forEach(i=>document.getElementById(i).value='');
+  const d = new Date();
+  const p = n => String(n).padStart(2,'0');
+  const ymd = d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());
+  document.getElementById('mDue').value = ymd;
+  document.getElementById('mStart').value = ymd+'T09:00';
+  document.getElementById('mEnd').value = ymd+'T18:00';
+  document.getElementById('mCount').value='3';
+  document.getElementById('mPriority').value='中';
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+async function edit(id){
+  const data = await api('/api/todos?done=');
+  if(!data) return;
+  const t = data.items.find(x=>x.id===id);
+  if(!t) return;
+  document.getElementById('mId').value=t.id;
+  document.getElementById('mTitle').value=t.title;
+  document.getElementById('mDue').value=t.due_date;
+  document.getElementById('mStart').value = t.remind_start ? t.remind_start.replace(' ','T') : '';
+  document.getElementById('mEnd').value = t.remind_end ? t.remind_end.replace(' ','T') : '';
+  document.getElementById('mCount').value=t.remind_count||'3';
+  document.getElementById('mPriority').value=t.priority;
+  new bootstrap.Modal(document.getElementById('modal')).show();
+}
+
+function save(){
+  confirmAction('确定保存该待办事项吗？', ()=>{ doSave(); });
+}
+async function doSave(){
+  const id = document.getElementById('mId').value;
+  const body = {
+    title: document.getElementById('mTitle').value,
+    due_date: document.getElementById('mDue').value,
+    remind_start: document.getElementById('mStart').value,
+    remind_end: document.getElementById('mEnd').value,
+    remind_count: parseInt(document.getElementById('mCount').value) || 1,
+    priority: document.getElementById('mPriority').value,
+  };
+  if(id) await api('/api/todos/'+id, {method:'PUT', body});
+  else await api('/api/todos', {method:'POST', body});
+  bootstrap.Modal.getInstance(document.getElementById('modal')).hide();
+  loadList();
+}
+
+async function toggleDone(id, done){
+  await api('/api/todos/'+id, {method:'PUT', body:{done: done}});
+  loadList();
+}
+
+function del(id){
+  confirmAction('确认删除该待办事项吗？', async ()=>{ await doDel(id); }, true);
+}
+async function doDel(id){
+  await api('/api/todos/'+id, {method:'DELETE'});
+  loadList();
+}
+
+function toggleAll(el){
+  document.querySelectorAll('#listBody input[type=checkbox]').forEach(cb=>{
+    if(cb.checked !== el.checked){ cb.checked = el.checked; toggleDone(cb.getAttribute('onchange').match(/(\d+)/)[1], el.checked); }
+  });
+}
+
+loadList();
+</script>
+{% endblock %}
